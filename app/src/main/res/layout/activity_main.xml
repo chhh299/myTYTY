@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/app_bg">
+
+    <!-- 1. 后台听悟桌面版引擎 WebView (负责加载 tingwu.aliyun.com 网页) -->
+    <WebView
+        android:id="@+id/engineWebView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="gone" />
+
+    <!-- 2. 前台移动端定制交互层 WebView (本地 assets 离线极速渲染) -->
+    <WebView
+        android:id="@+id/uiWebView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="visible" />
+
+    <!-- 3. 当处于“电脑网页全屏模式”时的浮动返回按钮 -->
+    <com.google.android.material.floatingactionbutton.ExtendedFloatingActionButton
+        android:id="@+id/btnReturnToMobileUi"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|start"
+        android:layout_margin="16dp"
+        android:text="返回卡片界面"
+        android:textColor="@color/white"
+        android:backgroundTint="@color/primary_dark"
+        android:visibility="gone" />
+
+    <!-- 4. 初始化加载指示器 -->
+    <ProgressBar
+        android:id="@+id/loadingIndicator"
+        style="?android:attr/progressBarStyleHorizontal"
+        android:layout_width="match_parent"
+        android:layout_height="4dp"
+        android:layout_gravity="top"
+        android:indeterminate="true"
+        android:visibility="gone" />
+
+</FrameLayout>

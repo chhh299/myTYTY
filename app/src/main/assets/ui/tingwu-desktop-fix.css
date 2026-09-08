@@ -1,0 +1,25 @@
+/* =========================================================
+   通义听悟桌面端视图移动端优化补丁 (tingwu-desktop-fix.css)
+   当用户切到“电脑网页视图”排查问题时自动注入，美化小屏幕排版
+   ========================================================= */
+
+/* 隐藏烦人的“下载手机客户端 / 下载桌面端”大横幅 */
+.download-client-banner,
+.desktop-app-banner,
+.top-nav-app-download,
+[class*="download-banner"],
+[class*="app-download-guide"] {
+  display: none !important;
+}
+
+/* 优化侧边栏与主工作区自适应 */
+body {
+  overflow-x: auto !important;
+  -webkit-overflow-scrolling: touch !important;
+}
+
+/* 增大常用按钮的点击热区 */
+button, [role="button"], a {
+  min-height: 38px !important;
+  touch-action: manipulation !important;
+}
