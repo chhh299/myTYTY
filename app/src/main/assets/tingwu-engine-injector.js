@@ -214,10 +214,11 @@
 
   // 尝试在当前 DOM 中搜寻并点击“开始录音”按钮
   function tryClickStartRecordButton() {
-    // 策略 1: 文本精确/前缀匹配优先
-    const allButtons = document.querySelectorAll('button, div[role="button"], a, span[role="button"]');
-    for (let btn of allButtons) {
-      const txt = (btn.innerText || '').trim();
+    // 策略 1: 文本精确/前缀匹配优先 (涵盖通义听悟桌面端所有入口)
+    const allElements = document.querySelectorAll('button, div[role="button"], a, span[role="button"], .ant-btn, [class*="btn"], [class*="card"]');
+    for (let el of allElements) {
+      const txt = (el.innerText || '').trim();
+      // 匹配核心按钮文本
       if (
         txt === '开启实时记录' ||
         txt === '开始实时记录' ||
@@ -228,17 +229,18 @@
         txt.includes('开始实时记录') ||
         (txt.includes('开始') && txt.includes('记录'))
       ) {
-        btn.click();
-        console.log('[mytyty-engine] 成功命中并点击文字按钮:', txt);
+        // 如果是首页大卡片或按钮，模拟点击
+        el.click();
+        console.log('[mytyty-engine] 成功命中并点击入口元素:', txt);
         confirmPreRecordingModals();
         sendAck(true);
         return true;
       }
     }
 
-    // 策略 2: 类名与无障碍属性定位 (针对工作台专用录音按钮)
+    // 策略 2: 类名与无障碍属性定位 (针对工作台中央核心大麦克风录音按钮)
     const specificButtons = document.querySelectorAll(
-      'button[class*="record"], button[aria-label*="录音"], .realtime-record-btn, [class*="start-record"], [class*="RecordBtn"], [class*="record-btn"]'
+      'button[class*="record"], button[aria-label*="录音"], .realtime-record-btn, [class*="start-record"], [class*="RecordBtn"], [class*="record-btn"], [class*="mic-btn"]'
     );
     for (let btn of specificButtons) {
       btn.click();
@@ -329,12 +331,25 @@
 
   // 自动点击听悟工作台“录音前置配置”确认弹窗（领域/语言选择）
   function confirmPreRecordingModals() {
-    setTimeout(() => {
-      const confirmBtns = document.querySelectorAll('.ant-modal-footer button.ant-btn-primary, button[class*="confirm"]');
-      confirmBtns.forEach(btn => {
-        try { btn.click(); } catch (e) {}
-      });
-    }, 300);
+    let checkCount = 0;
+    const confirmInterval = setInterval(() => {
+      checkCount++;
+      const confirmBtns = document.querySelectorAll(
+        '.ant-modal-footer button.ant-btn-primary, button[class*="confirm"], .ant-modal-footer button, [class*="start-confirm"]'
+      );
+      for (let btn of confirmBtns) {
+        const txt = (btn.innerText || '').trim();
+        if (txt === '开始记录' || txt === '确定' || txt === '确认' || txt.includes('开始') || txt.includes('确认')) {
+          try {
+            btn.click();
+            console.log('[mytyty-engine] 成功确认录音配置弹窗:', txt);
+          } catch (e) {}
+        }
+      }
+      if (checkCount >= 6) {
+        clearInterval(confirmInterval);
+      }
+    }, 400);
   }
 
   // 自动消杀营销及新手引导弹窗

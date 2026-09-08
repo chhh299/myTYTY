@@ -18,6 +18,7 @@ import android.util.Base64
 import android.view.View
 import android.view.WindowManager
 import android.webkit.CookieManager
+import android.webkit.WebView
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AlertDialog
@@ -185,9 +186,9 @@ class MainActivity : AppCompatActivity() {
                     "window.onNativeEngineState && window.onNativeEngineState('need_login', '需登录阿里云');",
                     null
                 )
-                // 若用户当前就在主页，直接展示原生等比缩放的引擎视图，确保短信登录可见
+                // 若用户当前就在主页，切到后台引擎视图展示
                 if (currentTabIndex == 0) {
-                    binding.uiWebView.visibility = View.GONE
+                    binding.uiWebView.visibility = View.INVISIBLE
                     binding.engineWebView.visibility = View.VISIBLE
                 }
             } else if (!isLoading && url.contains("tingwu.aliyun.com")) {
@@ -195,9 +196,9 @@ class MainActivity : AppCompatActivity() {
                     "window.onNativeEngineState && window.onNativeEngineState('ready', '听悟已就绪');",
                     null
                 )
-                // 登录成功跳回后，如果位于实时卡片页(Tab 1)确保恢复纯净卡片视图 (修复 P1-3)
+                // 登录成功跳回后，若在实时卡片(1)，确保前台卡片覆盖恢复
                 if (currentTabIndex == 1) {
-                    binding.engineWebView.visibility = View.GONE
+                    binding.engineWebView.visibility = View.VISIBLE
                     binding.uiWebView.visibility = View.VISIBLE
                 }
             }
@@ -248,7 +249,7 @@ class MainActivity : AppCompatActivity() {
                 return@setOnClickListener
             }
             switchTab(0)
-            binding.uiWebView.visibility = View.GONE
+            binding.uiWebView.visibility = View.INVISIBLE
             binding.engineWebView.visibility = View.VISIBLE
             val currUrl = binding.engineWebView.url ?: ""
             if (!currUrl.contains("tingwu.aliyun.com/home") && !currUrl.contains("passport")) {
@@ -258,9 +259,10 @@ class MainActivity : AppCompatActivity() {
         }
 
         // Tab 1: 实时 (专属移动端极简卡片，实时录音、双语字幕与双语翻译)
+        // 关键改动：engineWebView 保持 VISIBLE，uiWebView 覆盖其上 (VISIBLE)
         binding.tabLive.setOnClickListener {
             switchTab(1)
-            binding.engineWebView.visibility = View.GONE
+            binding.engineWebView.visibility = View.VISIBLE
             binding.uiWebView.visibility = View.VISIBLE
             binding.tvUrlSubtitle.text = "极简卡片 · 实时录音与翻译"
         }
@@ -272,7 +274,7 @@ class MainActivity : AppCompatActivity() {
                 return@setOnClickListener
             }
             switchTab(2)
-            binding.uiWebView.visibility = View.GONE
+            binding.uiWebView.visibility = View.INVISIBLE
             binding.engineWebView.visibility = View.VISIBLE
             binding.engineWebView.evaluateJavascript(
                 "window.__mytytyScrollToHistory && window.__mytytyScrollToHistory();",

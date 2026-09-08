@@ -104,9 +104,11 @@
     if (isPending) {
       recordBtnLabel.textContent = '正在连接引擎…';
       micStatusText.textContent = '听悟工作台正在就绪…';
-      btnToggleRecord.disabled = true;
+      btnToggleRecord.disabled = false; // 严禁完全禁用按钮，保证用户随时可重试
+      btnToggleRecord.style.opacity = '0.75';
     } else {
       btnToggleRecord.disabled = false;
+      btnToggleRecord.style.opacity = '1.0';
       recordBtnLabel.textContent = '开始实时记录';
       micStatusText.textContent = '电脑模式 · 麦克风待命';
     }

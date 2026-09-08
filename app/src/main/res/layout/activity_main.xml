@@ -77,23 +77,24 @@
 
     <!-- 2. 双层核心容器：前台极简移动卡片 UI + 后台真实听悟 PC 引擎 -->
     <FrameLayout
+        android:id="@+id/webViewContainer"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1">
 
-        <!-- 前台：极简移动端卡片 UI (对应 Tab 2 '实时'，初始待命 00:00:00，绝无假数据) -->
+        <!-- 引擎：真实通义听悟 PC 运行环境 (常驻底层，绝不使用 View.GONE，保证 Chromium 与 WebRTC 麦克风物理收音 100% 活跃) -->
+        <WebView
+            android:id="@+id/engineWebView"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:visibility="visible" />
+
+        <!-- 前台：极简移动端卡片 UI (覆盖在引擎之上，通过显隐控制前台呈现) -->
         <WebView
             android:id="@+id/uiWebView"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:visibility="visible" />
-
-        <!-- 引擎：真实通义听悟 PC 运行环境 (对应 Tab 1 登录、Tab 3 历史、后台 WebRTC 录音) -->
-        <WebView
-            android:id="@+id/engineWebView"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:visibility="gone" />
     </FrameLayout>
 
     <!-- 3. 原生底部四大导航 Tab 栏 -->
