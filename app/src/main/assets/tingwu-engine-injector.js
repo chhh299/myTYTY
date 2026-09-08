@@ -1,20 +1,23 @@
 /**
  * 通义听悟后台引擎数据穿透与控制脚本 (tingwu-engine-injector.js)
  * 注入至真实的 https://tingwu.aliyun.com 页面上下文中
- * 负责：统一句子流规整（消灭双胞胎气泡）、录音双向 ACK 握手、登录状态感知与多模态按钮控制
+ * 基于真实 DOM 反向工程校验：
+ * 1. 登录与工作台状态精准判定 (Cookie + 页面特征)
+ * 2. 真实录音两级触发与 ACK (首页入口 -> /doc/record -> 开始录音 -> 真正录音中检测)
+ * 3. 真实录音停止与确认 (点击 .stop-btn -> 自动点击 "确认结束" 弹窗 -> 保存完成)
+ * 4. 真实历史会议卡片列表精确抓取 (解析 .groupCards 与表格)
  */
 
 (() => {
-  console.log('[mytyty-engine] 听悟后台数据穿透引擎已启动');
+  console.log('[mytyty-engine] 听悟后台数据穿透引擎启动');
 
-  // 全局句子索引与文本去重映射 (解决 P0-2 孪生双胞胎气泡)
   let currentSentenceIndex = 0;
   let lastReportedOriginal = '';
   let lastReportedTrans = '';
   let lastStreamActiveTime = Date.now();
 
   // =========================================================
-  // 1. 拦截 WebSocket 实时音频转写与翻译数据帧 (主通道)
+  // 1. 拦截 WebSocket 实时音频转写与翻译数据帧
   // =========================================================
   const OrigWebSocket = window.WebSocket;
   window.WebSocket = function(url, protocols) {
@@ -25,16 +28,13 @@
         if (typeof event.data === 'string') {
           handleWsStringMessage(event.data);
         }
-      } catch (e) {
-        // 忽略非 JSON 数据包
-      }
+      } catch (e) {}
     });
 
     return ws;
   };
   window.WebSocket.prototype = OrigWebSocket.prototype;
 
-  // 拷贝 WebSocket 静态常量，避免第三方库或业务检测 readyState 抛错 (修复 P1-2)
   ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED'].forEach(key => {
     if (OrigWebSocket[key] !== undefined) {
       window.WebSocket[key] = OrigWebSocket[key];
@@ -45,7 +45,6 @@
     if (!msg || msg.length < 5) return;
     try {
       const parsed = JSON.parse(msg);
-
       let originalText = '';
       let translationText = '';
 
@@ -69,11 +68,12 @@
   }
 
   // =========================================================
-  // 2. DOM MutationObserver 实时转写穿透 (强力兜底通道)
+  // 2. DOM MutationObserver 实时转写穿透与状态监听
   // =========================================================
   const domObserver = new MutationObserver(() => {
     extractTextFromDom();
     checkEngineState();
+    checkRecordingTimerInDom();
   });
 
   function startObserver() {
@@ -105,31 +105,19 @@
     }
   }
 
-  /**
-   * 统一句子流规整器 (彻底根治 P0-2 孪生双胞胎气泡缺陷 & P1-1 长新句换句覆盖缺陷)
-   * 无论来自 WS 还是来自 DOM，统一基于单唯一的活动句索引递增与内容更新
-   */
   function normalizeAndDispatchSentence(original, translation) {
     if (!original && !translation) return;
-
-    // 内容无变化直接忽略
     if (original === lastReportedOriginal && translation === lastReportedTrans) {
       return;
     }
 
     lastStreamActiveTime = Date.now();
 
-    // 严密换句启发式逻辑 (修复 P1-1)：
-    // 1. 若旧文本为空，则属于首句，不自增；
-    // 2. 若新文本为旧文本的前缀延展 (startsWith)，说明是流式增量追加，更新同一句；
-    // 3. 若旧文本以句号/问号/叹号等标点结尾，且新文本不以旧文本开头，判定为换句；
-    // 4. 若新文本既不以旧文本开头，也不是旧文本的流式修正 (长度明显回缩或完全非前缀)，判定为换句。
     if (lastReportedOriginal) {
       const isPrefixExtension = original.startsWith(lastReportedOriginal);
       const isPunctuationClosed = /[。？！\n\r?!]$/.test(lastReportedOriginal.trim());
 
       if (!isPrefixExtension) {
-        // 既不是流式前缀追加，且旧句已标点完结，或者新句内容与旧句无包含重叠，判定换句
         if (isPunctuationClosed || !original.includes(lastReportedOriginal)) {
           currentSentenceIndex++;
         }
@@ -154,7 +142,7 @@
   }
 
   // =========================================================
-  // 3. 状态感知与无流看门狗 (精准三位一体检测：登录按钮、工作台特征、用户身份)
+  // 3. 真实状态检测 (登录态与工作台判定)
   // =========================================================
   function checkEngineState() {
     const url = window.location.href;
@@ -163,256 +151,79 @@
       '.aliyun-login-component-wrapper, .login-intercepts-modal-body, #alibaba-login-box, [class*="login-modal"], iframe[src*="login"], iframe[src*="passport"]'
     );
 
-    // 1. 检测页面上的登录/注册按钮或链接
     let hasLoginBtn = false;
-    const potentialLoginEls = document.querySelectorAll('button, a, span, div[role="button"], [class*="login"]');
+    const potentialLoginEls = document.querySelectorAll('button, a, span, div[role="button"]');
     for (let el of potentialLoginEls) {
       const txt = (el.innerText || '').trim();
-      if (
-        txt === '登录' ||
-        txt === '登录/注册' ||
-        txt === '立即登录' ||
-        txt === '去登录' ||
-        txt.includes('登录/注册') ||
-        txt === 'Sign In'
-      ) {
+      if (txt === '登录' || txt === '登录/注册' || txt === '立即登录' || txt === '去登录') {
         hasLoginBtn = true;
         break;
       }
     }
 
-    // 2. 检测页面上的已登录/工作台特征 (解决 AntD 动态类名无法命中导致死锁在 loading 的严重缺陷)
-    const hasUserAvatar = document.querySelector(
-      '[class*="avatar"], [class*="user-avatar"], [class*="user-profile"], [class*="header-user"], [class*="userInfo"], img[class*="avatar"], .user-avatar-wrapper, [class*="user-name"], .ant-avatar'
-    );
-
-    // 3. 检测通义听悟 PC 工作台的核心功能模块 (已登录的决定性特征)
-    let hasWorkbenchFeature = false;
-    const bodyText = (document.body ? document.body.innerText || '' : '');
-    if (
-      bodyText.includes('实时记录') ||
-      bodyText.includes('开启实时记录') ||
-      bodyText.includes('新建记录') ||
-      bodyText.includes('音视频转写') ||
-      bodyText.includes('全部文档') ||
-      bodyText.includes('历史记录') ||
-      document.querySelector('[class*="record"], [class*="workbench"], .ant-card, .ant-layout-content')
-    ) {
-      hasWorkbenchFeature = true;
-    }
-
-    // 4. 检查 Cookie 登录特征 (阿里云统一身份 Token)
+    // 检查是否有登录鉴权 Cookie
     let hasAuthCookie = false;
     try {
       const cookie = document.cookie || '';
-      if (cookie.includes('login_aliyunid') || cookie.includes('munb') || cookie.includes('cna') || cookie.includes('aliyun_choice')) {
+      if (cookie.includes('login_aliyunid') || cookie.includes('munb') || cookie.includes('cna') || cookie.includes('login_current_pk')) {
         hasAuthCookie = true;
       }
     } catch (e) {}
 
+    // 检查页面主体内容
+    const bodyText = (document.body ? document.body.innerText || '' : '');
+    const hasWorkbenchFeature = (
+      url.includes('/doc/record') ||
+      url.includes('/doc/transcripts') ||
+      bodyText.includes('开启实时记录') ||
+      bodyText.includes('我的记录') ||
+      bodyText.includes('全部文档') ||
+      bodyText.includes('上传音视频') ||
+      document.querySelector('[class*="groupCards"], [class*="groupCard"], .stop-btn') !== null
+    );
+
     let state = 'ready';
-    let desc = '听悟已登录就绪';
+    let desc = '听悟已就绪';
 
     if (isLoginUrl || hasLoginModal) {
       state = 'need_login';
       desc = '请在主页登录阿里云账号';
-    } else if (hasLoginBtn && !hasUserAvatar && !hasAuthCookie) {
-      // 明确有登录按钮，且没有头像或身份 Cookie，属于未登录状态
+    } else if (hasLoginBtn && !hasAuthCookie) {
       state = 'need_login';
       desc = '未登录，请在主页完成登录';
-    } else if (hasUserAvatar || hasWorkbenchFeature || hasAuthCookie || (!hasLoginBtn && bodyText.length > 50)) {
-      // 只要具备用户身份、或工作台特征、或无登录按钮且页面已渲染，100% 为已登录就绪！
+    } else if (hasAuthCookie || hasWorkbenchFeature || (!hasLoginBtn && bodyText.length > 50)) {
       state = 'ready';
       desc = '听悟已登录就绪';
     } else {
-      // 仅在完全空白无内容时才为 loading
       state = 'loading';
       desc = '听悟加载中…';
     }
-
-    console.log('[mytyty-engine] 状态检测结果 ->', state, desc, { hasLoginBtn, hasUserAvatar, hasWorkbenchFeature, hasAuthCookie });
 
     if (window.TingwuBridge && window.TingwuBridge.notifyEngineState) {
       window.TingwuBridge.notifyEngineState(state, desc);
     }
   }
 
-  // 暴露给原生层主动调用
   window.checkEngineState = checkEngineState;
-
-  // React SPA 异步渲染看门狗：页面初次加载后分别在 500ms、1500ms、3000ms 持续自旋刷新状态
-  [500, 1500, 3000].forEach(delay => {
-    setTimeout(checkEngineState, delay);
-  });
-
-  // 20秒静默看门狗
-  setInterval(() => {
-    if (window.__isRecordingActive) {
-      const silentSecs = (Date.now() - lastStreamActiveTime) / 1000;
-      if (silentSecs > 20) {
-        if (window.TingwuBridge && window.TingwuBridge.notifyEngineState) {
-          window.TingwuBridge.notifyEngineState('stream_idle', '暂无实时语音流');
-        }
-      }
-    }
-  }, 10000);
+  [300, 1000, 2500].forEach(delay => setTimeout(checkEngineState, delay));
 
   // =========================================================
-  // 4. 多模态录音控制选择器与双向 ACK 协议 (解决真实录音触发与页面跳转无缝衔接)
+  // 4. 真实录音状态看门狗与真实计时器捕获
   // =========================================================
   window.__isRecordingActive = false;
 
-  // 页面加载完成后，检查是否有由主页跳转工作台发起的“自启动录音任务”
-  function checkPendingAutoRecordTask() {
-    try {
-      const pendingTask = sessionStorage.getItem('__mytyty_pending_auto_record');
-      if (pendingTask === '1') {
-        sessionStorage.removeItem('__mytyty_pending_auto_record');
-        console.log('[mytyty-engine] 感知到工作台重定向自启动录音任务，开始尝试点击');
-        let retryCount = 0;
-        const autoInterval = setInterval(() => {
-          retryCount++;
-          const success = tryClickStartRecordButton();
-          if (success || retryCount > 15) {
-            clearInterval(autoInterval);
-            if (!success) {
-              console.warn('[mytyty-engine] 工作台自启动录音重试超时');
-              sendAck(false);
-            }
-          }
-        }, 500);
-      }
-    } catch (e) {}
-  }
-
-  // 辅助函数：深度派发 React 兼容的鼠标点击事件 (解决 React 18 合成事件不触发问题)
-  function dispatchReactClick(element) {
-    try {
-      element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
-      element.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
-      element.click();
-    } catch (e) {
-      element.click();
-    }
-  }
-
-  // 尝试在当前 DOM 中搜寻并点击“开始录音”按钮
-  function tryClickStartRecordButton() {
-    // 策略 1: 文本模糊加权匹配 (涵盖通义听悟桌面端所有入口，包括多行大卡片)
-    const allElements = document.querySelectorAll(
-      'button, div[role="button"], a, span[role="button"], .ant-btn, [class*="btn"], [class*="card"], div'
+  function checkRecordingTimerInDom() {
+    const text = document.body ? document.body.innerText : '';
+    const isActuallyRecording = (
+      (text.includes('录音中…') || text.includes('/06:00:00')) &&
+      document.querySelector('.stop-btn, [class*="stop-btn"]') !== null
     );
 
-    for (let el of allElements) {
-      // 避免选中顶层包含所有文字的容器（body 或 container）
-      if (el.children && el.children.length > 5) continue;
-
-      const txt = (el.innerText || '').trim();
-      if (!txt) continue;
-
-      // 匹配首页大卡片或按钮文本
-      if (
-        txt === '开启实时记录' ||
-        txt === '开始实时记录' ||
-        txt === '开始记录' ||
-        txt === '实时记录' ||
-        txt === '开始录音' ||
-        txt.includes('开启实时记录') ||
-        txt.includes('开始实时记录') ||
-        (txt.includes('实时记录') && txt.includes('转写')) ||
-        (txt.includes('开始') && txt.includes('记录'))
-      ) {
-        dispatchReactClick(el);
-        console.log('[mytyty-engine] 成功命中并点击入口元素:', txt);
-        confirmPreRecordingModals();
-        sendAck(true);
-        return true;
-      }
-    }
-
-    // 策略 2: 类名与无障碍属性定位 (针对工作台中央核心大麦克风录音按钮)
-    const specificButtons = document.querySelectorAll(
-      'button[class*="record"], button[aria-label*="录音"], .realtime-record-btn, [class*="start-record"], [class*="RecordBtn"], [class*="record-btn"], [class*="mic-btn"]'
-    );
-    for (let btn of specificButtons) {
-      dispatchReactClick(btn);
-      console.log('[mytyty-engine] 命中专用录音按钮选择器');
-      confirmPreRecordingModals();
+    if (isActuallyRecording && !window.__isRecordingActive) {
+      console.log('[mytyty-engine] 检测到真实页面已进入录音状态！');
       sendAck(true);
-      return true;
     }
-
-    return false;
   }
-
-  window.__tingwuController = {
-    startRecording: function() {
-      console.log('[mytyty-engine] 执行开始录音指令');
-      lastStreamActiveTime = Date.now();
-
-      // 先在当前页面尝试搜寻并点击录音按钮
-      if (tryClickStartRecordButton()) {
-        return true;
-      }
-
-      // 若当前在首页(/home)或非录音工作台，标记任务并跳转到听悟官方录音工作台
-      if (!window.location.href.includes('/doc/record')) {
-        console.log('[mytyty-engine] 当前页面无录音按钮，设置自启动标记并跳转至工作台');
-        try {
-          sessionStorage.setItem('__mytyty_pending_auto_record', '1');
-        } catch (e) {}
-        window.location.href = 'https://tingwu.aliyun.com/doc/record';
-        return true;
-      }
-
-      // 如果已经在 /doc/record 仍未找到按钮，延时重试 3 次后再判失败
-      let retries = 0;
-      const retryTimer = setInterval(() => {
-        retries++;
-        if (tryClickStartRecordButton()) {
-          clearInterval(retryTimer);
-        } else if (retries >= 3) {
-          clearInterval(retryTimer);
-          console.warn('[mytyty-engine] 未在页面上找到录音按钮');
-          sendAck(false);
-        }
-      }, 600);
-
-      return false;
-    },
-
-    stopRecording: function() {
-      console.log('[mytyty-engine] 执行结束录音指令');
-      window.__isRecordingActive = false;
-      try {
-        sessionStorage.removeItem('__mytyty_pending_auto_record');
-      } catch (e) {}
-
-      // 策略 1: 文本定位
-      const allButtons = document.querySelectorAll('button, div[role="button"], a, span[role="button"]');
-      for (let btn of allButtons) {
-        const txt = (btn.innerText || '').trim();
-        if (txt === '结束记录' || txt === '结束' || txt === '停止' || txt.includes('完成') || txt.includes('结束录音') || txt.includes('停止录音')) {
-          btn.click();
-          console.log('[mytyty-engine] 成功点击结束录音按钮:', txt);
-          return true;
-        }
-      }
-
-      // 策略 2: 类名定位
-      const stopButtons = document.querySelectorAll(
-        'button[class*="stop"], button[class*="finish"], [class*="stop-record"], [class*="finish-record"]'
-      );
-      for (let btn of stopButtons) {
-        btn.click();
-        return true;
-      }
-
-      return false;
-    }
-  };
-
-  checkPendingAutoRecordTask();
 
   function sendAck(started) {
     window.__isRecordingActive = started;
@@ -421,68 +232,213 @@
     }
   }
 
-  // 自动点击听悟工作台“录音前置配置”确认弹窗（领域/语言选择）
-  function confirmPreRecordingModals() {
-    let checkCount = 0;
-    const confirmInterval = setInterval(() => {
-      checkCount++;
-      const confirmBtns = document.querySelectorAll(
-        '.ant-modal-footer button.ant-btn-primary, button[class*="confirm"], .ant-modal-footer button, [class*="start-confirm"]'
-      );
-      for (let btn of confirmBtns) {
-        const txt = (btn.innerText || '').trim();
-        if (txt === '开始记录' || txt === '确定' || txt === '确认' || txt.includes('开始') || txt.includes('确认')) {
-          try {
-            btn.click();
-            console.log('[mytyty-engine] 成功确认录音配置弹窗:', txt);
-          } catch (e) {}
-        }
-      }
-      if (checkCount >= 6) {
-        clearInterval(confirmInterval);
-      }
-    }, 400);
+  // =========================================================
+  // 5. 真实录音控制器 (开始/停止/确认保存)
+  // =========================================================
+  function dispatchClick(el) {
+    if (!el) return;
+    try {
+      const events = ['mouseenter', 'mouseover', 'mousedown', 'mouseup', 'click'];
+      events.forEach(type => {
+        el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
+      });
+    } catch (e) {
+      el.click();
+    }
   }
 
-  // 自动消杀营销及新手引导弹窗
-  const closeBtns = document.querySelectorAll('.ant-modal-close, [class*="guide-close"], [class*="survey-close"]');
-  closeBtns.forEach(btn => {
-    const modal = btn.closest('.ant-modal, [class*="dialog"]');
-    if (modal && (modal.innerText.includes('新手引导') || modal.innerText.includes('问卷调研'))) {
-      btn.click();
+  // 页面自启动任务检查 (跨页面跳转时继承)
+  function checkPendingAutoRecord() {
+    try {
+      const task = sessionStorage.getItem('__mytyty_pending_record');
+      if (task === '1') {
+        console.log('[mytyty-engine] 发现待执行自启动录音任务，当前 URL:', window.location.href);
+        sessionStorage.removeItem('__mytyty_pending_record');
+
+        let attempts = 0;
+        const autoInterval = setInterval(() => {
+          attempts++;
+          const startBtn = Array.from(document.querySelectorAll('*')).find(e => (e.innerText || '').trim() === '开始录音');
+          if (startBtn) {
+            clearInterval(autoInterval);
+            console.log('[mytyty-engine] 自启动任务命中【开始录音】按钮，触发点击');
+            dispatchClick(startBtn);
+          } else if (attempts > 20) {
+            clearInterval(autoInterval);
+            console.warn('[mytyty-engine] 自启动录音寻找开始按钮超时');
+          }
+        }, 400);
+      }
+    } catch (e) {}
+  }
+
+  checkPendingAutoRecord();
+
+  window.__tingwuController = {
+    startRecording: function() {
+      console.log('[mytyty-engine] 收到启动录音指令，当前 URL:', window.location.href);
+      lastStreamActiveTime = Date.now();
+
+      // 场景 A: 当前已经在 /doc/record 录音工作台
+      if (window.location.href.includes('/doc/record')) {
+        const startBtn = Array.from(document.querySelectorAll('*')).find(e => (e.innerText || '').trim() === '开始录音');
+        if (startBtn) {
+          console.log('[mytyty-engine] 在录音工作台直接点击【开始录音】');
+          dispatchClick(startBtn);
+          return true;
+        }
+      }
+
+      // 场景 B: 当前在主页 (/home)，点击【开启实时记录】跳转到工作台
+      const homeRecordBtn = Array.from(document.querySelectorAll('*')).find(e => (e.innerText || '').trim() === '开启实时记录');
+      if (homeRecordBtn) {
+        console.log('[mytyty-engine] 在主页点击【开启实时记录】，设置自启动任务并跳转');
+        try {
+          sessionStorage.setItem('__mytyty_pending_record', '1');
+        } catch (e) {}
+        dispatchClick(homeRecordBtn);
+        return true;
+      }
+
+      // 场景 C: 直接导航到工作台
+      console.log('[mytyty-engine] 直接导航至 /doc/record 工作台');
+      try {
+        sessionStorage.setItem('__mytyty_pending_record', '1');
+      } catch (e) {}
+      window.location.href = 'https://tingwu.aliyun.com/doc/record';
+      return true;
+    },
+
+    stopRecording: function() {
+      console.log('[mytyty-engine] 收到结束录音指令');
+      window.__isRecordingActive = false;
+      try {
+        sessionStorage.removeItem('__mytyty_pending_record');
+      } catch (e) {}
+
+      // 1. 点击停止录音按钮 (.stop-btn)
+      const stopBtn = document.querySelector('.stop-btn, [class*="stop-btn"], [class*="stopBtn"]');
+      if (stopBtn) {
+        console.log('[mytyty-engine] 成功点击 .stop-btn 停止按钮');
+        dispatchClick(stopBtn);
+      } else {
+        // 兜底寻找
+        const allBtns = Array.from(document.querySelectorAll('button, div, span'));
+        for (const b of allBtns) {
+          const t = (b.innerText || '').trim();
+          if (t === '结束' || t === '停止' || t === '结束录音') {
+            dispatchClick(b);
+            break;
+          }
+        }
+      }
+
+      // 2. 自动确认结束录音弹窗 (寻找 "确认结束" 按钮)
+      let confirmAttempts = 0;
+      const confirmInterval = setInterval(() => {
+        confirmAttempts++;
+        const allModalBtns = Array.from(document.querySelectorAll('.ant-modal button, [class*="modal"] button, button, div'));
+        for (const b of allModalBtns) {
+          const t = (b.innerText || '').trim();
+          if (t === '确认结束' || t === '结束并保存') {
+            clearInterval(confirmInterval);
+            console.log('[mytyty-engine] 成功自动点击弹窗中的【确认结束】');
+            dispatchClick(b);
+
+            // 核心修复：录音保存成功后，平滑返回主页 https://tingwu.aliyun.com/home
+            // 确保主页工作台重置待命，且历史记录列表实时刷新
+            setTimeout(() => {
+              console.log('[mytyty-engine] 保存请求已完成，自动导航回通义听悟 home 主页');
+              window.location.href = 'https://tingwu.aliyun.com/home';
+            }, 1800);
+            return;
+          }
+        }
+        if (confirmAttempts >= 10) {
+          clearInterval(confirmInterval);
+          // 兜底：若未弹出确认弹窗但页面停在 record 或 transcripts，也自动返回 home
+          setTimeout(() => {
+            if (window.location.href.includes('/doc/record') || window.location.href.includes('/doc/transcripts')) {
+              console.log('[mytyty-engine] 兜底自动返回 home 主页');
+              window.location.href = 'https://tingwu.aliyun.com/home';
+            }
+          }, 2000);
+        }
+      }, 300);
+
+      return true;
     }
-  });
+  };
+
+  // 监听页面 URL 变化，若录音结束后跳转至转写详情页 /doc/transcripts/，自动返回 home 主页
+  if (window.location.href.includes('/doc/transcripts/')) {
+    console.log('[mytyty-engine] 检测到处于录音详情页，2 秒后自动返回 home 主页');
+    setTimeout(() => {
+      window.location.href = 'https://tingwu.aliyun.com/home';
+    }, 2000);
+  }
 
   // =========================================================
-  // 5. 历史记录数据提取与回传桥梁 (为移动端专属卡片提供真实数据)
+  // 6. 真实历史会议卡片列表抓取器 (经过实机 DOM 验证)
   // =========================================================
   function extractHistoryListFromPage() {
     const list = [];
     try {
-      // 策略 1: 解析通义听悟工作台历史表格 / 列表项
-      const items = document.querySelectorAll(
-        '.ant-table-row, [class*="doc-item"], [class*="record-item"], [class*="history-item"], tr[data-row-key]'
-      );
+      // 真实听悟主页卡片: .groupCards
+      const cards = document.querySelectorAll('[class*="groupCards"], [class*="groupCard"]');
+      if (cards.length > 0) {
+        cards.forEach((card, idx) => {
+          const text = card.innerText || '';
+          const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
 
-      items.forEach((row, idx) => {
-        const titleEl = row.querySelector('[class*="title"], [class*="name"], a, td:first-child');
-        const timeEl = row.querySelector('[class*="time"], [class*="date"], td:nth-child(2)');
-        const durationEl = row.querySelector('[class*="duration"], [class*="length"], td:nth-child(3)');
+          let title = lines[0] || ('会议记录 ' + (idx + 1));
+          let duration = '00:00';
+          let time = '';
+          let snippet = '';
 
-        const title = titleEl ? (titleEl.innerText || '').trim() : '';
-        if (title && title.length > 0 && !title.includes('标题') && !title.includes('文档名称')) {
+          for (let i = 1; i < lines.length; i++) {
+            const l = lines[i];
+            if (/^\d{2}:\d{2}(:\d{2})?$/.test(l)) {
+              duration = l;
+            } else if (l.includes('今天') || l.includes('昨天') || /^\d{4}-\d{2}-\d{2}/.test(l)) {
+              time = l;
+            } else if (!snippet) {
+              snippet = l;
+            }
+          }
+
           list.push({
-            id: row.getAttribute('data-row-key') || ('history_' + idx),
+            id: 'history_record_' + idx,
             title: title,
-            time: timeEl ? (timeEl.innerText || '').trim() : '近期记录',
-            duration: durationEl ? (durationEl.innerText || '').trim() : '已转写'
+            time: time || '近期',
+            duration: duration,
+            snippet: snippet
           });
-        }
-      });
+        });
+      } else {
+        // 兜底表格形式
+        const rows = document.querySelectorAll('.ant-table-row, tr[data-row-key]');
+        rows.forEach((row, idx) => {
+          const titleEl = row.querySelector('[class*="title"], [class*="name"], a, td:first-child');
+          const timeEl = row.querySelector('[class*="time"], [class*="date"], td:nth-child(2)');
+          const durationEl = row.querySelector('[class*="duration"], [class*="length"], td:nth-child(3)');
+          const title = titleEl ? (titleEl.innerText || '').trim() : '';
+          if (title && !title.includes('标题')) {
+            list.push({
+              id: row.getAttribute('data-row-key') || ('history_row_' + idx),
+              title: title,
+              time: timeEl ? (timeEl.innerText || '').trim() : '近期记录',
+              duration: durationEl ? (durationEl.innerText || '').trim() : '已转写',
+              snippet: ''
+            });
+          }
+        });
+      }
     } catch (e) {
-      console.warn('[mytyty-engine] 提取历史记录异常:', e);
+      console.warn('[mytyty-engine] 抓取历史记录异常:', e);
     }
 
+    console.log('[mytyty-engine] 提取到历史记录条数:', list.length);
     if (window.TingwuBridge && window.TingwuBridge.onHistoryListReceived) {
       window.TingwuBridge.onHistoryListReceived(JSON.stringify(list));
     }
@@ -490,7 +446,7 @@
 
   window.fetchHistoryList = function() {
     console.log('[mytyty-engine] 收到拉取历史记录指令');
-    // 如果当前不在工作台或文档列表页，先在当前页提取，如为空且不在首页则视情况拉取
+    // 如果当前在录音或详情页且主页不在，可直接提取当前或按需抓取
     extractHistoryListFromPage();
   };
 

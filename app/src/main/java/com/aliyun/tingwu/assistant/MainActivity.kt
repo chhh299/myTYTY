@@ -424,6 +424,15 @@ class MainActivity : AppCompatActivity() {
             "window.onNativeRecordingStatus && window.onNativeRecordingStatus(false);",
             null
         )
+
+        // 4. 录音结束后延迟 2.5 秒确保云端保存完毕，后台引擎无缝切回 home 主页，并拉取刷新最新历史列表
+        timerHandler.postDelayed({
+            val currUrl = binding.engineWebView.url ?: ""
+            if (!currUrl.contains("tingwu.aliyun.com/home")) {
+                binding.engineWebView.loadUrl(TINGWU_HOME_URL)
+            }
+            fetchHistoryListFromEngine()
+        }, 2500)
     }
 
     // =========================================================

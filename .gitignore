@@ -25,3 +25,7 @@ npm-debug.log*
 *.keystore
 
 .harness/
+.tmp_browser_profile/
+package.json
+package-lock.json
+tests/*.output
