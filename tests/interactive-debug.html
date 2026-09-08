@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>mytyty 本地真实浏览器交互测试控制台</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f0f2f5; margin: 0; padding: 20px; }
+    .container { max-width: 900px; margin: 0 auto; background: white; border-radius: 12px; padding: 24px; box-shadow: 0 4px 16px rgba(0,0,0,0.08); }
+    h1 { font-size: 20px; margin-top: 0; color: #1f2329; border-bottom: 2px solid #00B96B; padding-bottom: 10px; }
+    .panel { border: 1px solid #e1e4e8; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+    .panel h2 { font-size: 16px; margin-top: 0; }
+    .btn-group { display: flex; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
+    button { background: #00B96B; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 14px; }
+    button:hover { background: #009656; }
+    button.secondary { background: #4e5969; }
+    button.secondary:hover { background: #272e3b; }
+    #mockDomContainer { background: #fafbfc; border: 1px dashed #c0c4cc; border-radius: 6px; padding: 12px; min-height: 80px; margin-bottom: 12px; }
+    #logOutput { background: #1f2329; color: #a6f3a6; font-family: monospace; font-size: 12px; padding: 12px; border-radius: 6px; height: 180px; overflow-y: auto; }
+    .log-line { margin: 4px 0; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; font-weight: bold; }
+    .badge.ready { background: #e6f8ea; color: #00b96b; }
+    .badge.login { background: #fff2e8; color: #fa541c; }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <h1>mytyty 听悟引擎本地实时交互测试台</h1>
+
+  <div class="panel">
+    <h2>1. 模拟通义听悟页面状态切换</h2>
+    <div class="btn-group">
+      <button onclick="setSimulatedPage('logged_out')">切换为：未登录主页 (含登录按钮)</button>
+      <button onclick="setSimulatedPage('logged_in')">切换为：已登录主页 (含用户头像)</button>
+      <button onclick="setSimulatedPage('workbench')">切换为：工作台 (含录音与配置弹窗)</button>
+    </div>
+    <div id="mockDomContainer"></div>
+  </div>
+
+  <div class="panel">
+    <h2>2. 控制指令触发</h2>
+    <div class="btn-group">
+      <button onclick="testStartRecording()">调用 startRecording()</button>
+      <button class="secondary" onclick="testStopRecording()">调用 stopRecording()</button>
+      <button class="secondary" onclick="testCheckState()">调用 checkEngineState()</button>
+      <button class="secondary" onclick="testFetchHistory()">提取历史会议卡片</button>
+      <button class="secondary" onclick="clearLogs()">清空日志</button>
+    </div>
+    <div>当前原生层接收到的状态: <span id="currentStatusBadge" class="badge login">未检测</span></div>
+  </div>
+
+  <div class="panel">
+    <h2>3. 模拟 Android TingwuBridge 捕获的实时日志</h2>
+    <div id="logOutput"></div>
+  </div>
+</div>
+
+<script>
+  // 1. 模拟 Android TingwuBridge 原生对象
+  window.TingwuBridge = {
+    notifyEngineState: function(state, desc) {
+      log('[Bridge] 接收到引擎状态上报 -> ' + state + ' (' + desc + ')');
+      const badge = document.getElementById('currentStatusBadge');
+      badge.textContent = state + ' : ' + desc;
+      badge.className = 'badge ' + (state === 'ready' ? 'ready' : 'login');
+    },
+    notifyRecordingAck: function(started) {
+      log('[Bridge] 接收到双向 ACK 握手 -> started = ' + started);
+    },
+    onTranscriptionReceived: function(jsonStr) {
+      log('[Bridge] 接收到转写数据包 -> ' + jsonStr);
+    },
+    onHistoryListReceived: function(jsonStr) {
+      log('[Bridge] 成功提取到历史会议列表 -> ' + jsonStr);
+    }
+  };
+
+  function testFetchHistory() {
+    log('>>> 原生触发 window.fetchHistoryList()');
+    if (window.fetchHistoryList) {
+      window.fetchHistoryList();
+    }
+  }
+
+  function log(msg) {
+    const box = document.getElementById('logOutput');
+    const line = document.createElement('div');
+    line.className = 'log-line';
+    line.textContent = '[' + new Date().toLocaleTimeString() + '] ' + msg;
+    box.appendChild(line);
+    box.scrollTop = box.scrollHeight;
+  }
+
+  function clearLogs() {
+    document.getElementById('logOutput').innerHTML = '';
+  }
+
+  // 2. 模拟 DOM 页面渲染
+  function setSimulatedPage(type) {
+    const container = document.getElementById('mockDomContainer');
+    container.innerHTML = '';
+    log('设置模拟页面状态为: ' + type);
+
+    if (type === 'logged_out') {
+      container.innerHTML = `
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <span>通义听悟 PC 首页 (未登录)</span>
+          <button class="ant-btn login-btn" style="background:#00B96B;color:#fff;">登录/注册</button>
+        </div>
+      `;
+    } else if (type === 'logged_in') {
+      container.innerHTML = `
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <span>通义听悟 PC 首页 (已登录)</span>
+          <div class="user-avatar-wrapper"><img src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32'><circle cx='16' cy='16' r='16' fill='%2300B96B'/></svg>" class="user-avatar" /> 用户张三</div>
+        </div>
+        <div class="ant-card realtime-card" style="margin-top:10px; padding:15px; background:#fff; border:1px solid #ddd; cursor:pointer;" onclick="log('[页面] 首页大卡片被原生触发点击')">
+          <h3>实时记录</h3>
+          <p>开启实时语音转写</p>
+        </div>
+      `;
+    } else if (type === 'workbench') {
+      container.innerHTML = `
+        <div style="text-align:center; padding:20px;">
+          <button class="realtime-record-btn" style="width:60px;height:60px;border-radius:30px;background:#f5222d;color:#fff;" onclick="log('[页面] 录音圆形麦克风按钮被点击')">●</button>
+        </div>
+        <div class="ant-modal-footer" style="margin-top:10px;">
+          <button class="ant-btn-primary" onclick="log('[页面] 配置弹窗确定按钮被点击')">开始记录</button>
+        </div>
+      `;
+    }
+
+    if (window.checkEngineState) {
+      window.checkEngineState();
+    }
+  }
+
+  function testStartRecording() {
+    log('>>> 原生触发 window.__tingwuController.startRecording()');
+    if (window.__tingwuController) {
+      window.__tingwuController.startRecording();
+    }
+  }
+
+  function testStopRecording() {
+    log('>>> 原生触发 window.__tingwuController.stopRecording()');
+    if (window.__tingwuController) {
+      window.__tingwuController.stopRecording();
+    }
+  }
+
+  function testCheckState() {
+    if (window.checkEngineState) {
+      window.checkEngineState();
+    }
+  }
+
+  // 初始加载未登录状态
+  window.onload = function() {
+    setSimulatedPage('logged_out');
+  };
+</script>
+
+<!-- 加载真实的注入脚本 -->
+<script src="../app/src/main/assets/tingwu-engine-injector.js"></script>
+
+</body>
+</html>

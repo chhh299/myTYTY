@@ -79,4 +79,34 @@ class TingwuBridge(
             activity.reloadEngine()
         }
     }
+
+    /**
+     * 前台卡片请求拉取历史会议记录
+     */
+    @JavascriptInterface
+    fun fetchHistoryList() {
+        mainHandler.post {
+            activity.fetchHistoryListFromEngine()
+        }
+    }
+
+    /**
+     * 后台听悟引擎回传提取到的历史会议列表
+     */
+    @JavascriptInterface
+    fun onHistoryListReceived(json: String) {
+        mainHandler.post {
+            activity.relayHistoryListToUi(json)
+        }
+    }
+
+    /**
+     * 点击历史记录卡片查看详情
+     */
+    @JavascriptInterface
+    fun openHistoryDetail(docId: String) {
+        mainHandler.post {
+            activity.handleOpenHistoryDetail(docId)
+        }
+    }
 }

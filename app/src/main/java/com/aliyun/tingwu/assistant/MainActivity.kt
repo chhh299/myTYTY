@@ -48,6 +48,7 @@ class MainActivity : AppCompatActivity() {
     private var recordSeconds = 0
     private var backPressedTime = 0L
     private var currentTabIndex = 1 // 默认停留在 Tab 1: 实时极简卡片界面
+    private var currentEngineState = "loading" // 由网页注入感知器更新：loading | need_login | ready
 
     private val timerHandler = Handler(Looper.getMainLooper())
     private val timerRunnable = object : Runnable {
@@ -180,22 +181,27 @@ class MainActivity : AppCompatActivity() {
         engine.webViewClient = TingwuWebViewClient(this) { isLoading, url ->
             binding.pageProgressBar.visibility = if (isLoading) View.VISIBLE else View.GONE
 
-            // 登录弹窗/独立登录页深度自适应接管 (解决跨域 iframe 限制)
-            if (url.contains("login") || url.contains("passport")) {
+            if (isLoading) {
+                // 加载中，只更新状态为 loading，绝不提前虚假判定为 ready
                 binding.uiWebView.evaluateJavascript(
-                    "window.onNativeEngineState && window.onNativeEngineState('need_login', '需登录阿里云');",
+                    "window.onNativeEngineState && window.onNativeEngineState('loading', '听悟连接中…');",
                     null
                 )
-                // 若用户当前就在主页，切到后台引擎视图展示
+            } else {
+                // 页面加载完成，触发注入脚本执行精准 DOM 状态检测 (由 Bridge 统一上报真实 need_login 或 ready)
+                binding.engineWebView.evaluateJavascript(
+                    "window.checkEngineState && window.checkEngineState();",
+                    null
+                )
+            }
+
+            // 登录弹窗/独立登录页深度自适应接管
+            if (url.contains("login") || url.contains("passport")) {
                 if (currentTabIndex == 0) {
                     binding.uiWebView.visibility = View.INVISIBLE
                     binding.engineWebView.visibility = View.VISIBLE
                 }
             } else if (!isLoading && url.contains("tingwu.aliyun.com")) {
-                binding.uiWebView.evaluateJavascript(
-                    "window.onNativeEngineState && window.onNativeEngineState('ready', '听悟已就绪');",
-                    null
-                )
                 // 登录成功跳回后，若在实时卡片(1)，确保前台卡片覆盖恢复
                 if (currentTabIndex == 1) {
                     binding.engineWebView.visibility = View.VISIBLE
@@ -259,28 +265,34 @@ class MainActivity : AppCompatActivity() {
         }
 
         // Tab 1: 实时 (专属移动端极简卡片，实时录音、双语字幕与双语翻译)
-        // 关键改动：engineWebView 保持 VISIBLE，uiWebView 覆盖其上 (VISIBLE)
         binding.tabLive.setOnClickListener {
             switchTab(1)
             binding.engineWebView.visibility = View.VISIBLE
             binding.uiWebView.visibility = View.VISIBLE
+            binding.uiWebView.evaluateJavascript(
+                "window.onNativeSwitchView && window.onNativeSwitchView('live');",
+                null
+            )
             binding.tvUrlSubtitle.text = "极简卡片 · 实时录音与翻译"
         }
 
-        // Tab 2: 历史 (查看云端已保存的历史会议纪要)
+        // Tab 2: 历史 (纯正移动端历史会议卡片列表，坚决杜绝直接裸露原版 PC 网页)
         binding.tabHistory.setOnClickListener {
             if (isRecording) {
                 Toast.makeText(this, "正在实时录音中，请先结束录音再切换页面", Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
             switchTab(2)
-            binding.uiWebView.visibility = View.INVISIBLE
+            // 关键修复：保持 uiWebView 前台显示移动端卡片，绝不让 PC 原版网页裸露！
             binding.engineWebView.visibility = View.VISIBLE
-            binding.engineWebView.evaluateJavascript(
-                "window.__mytytyScrollToHistory && window.__mytytyScrollToHistory();",
+            binding.uiWebView.visibility = View.VISIBLE
+            binding.uiWebView.evaluateJavascript(
+                "window.onNativeSwitchView && window.onNativeSwitchView('history');",
                 null
             )
-            binding.tvUrlSubtitle.text = "历史 · 云端会议与文档记录"
+            // 通知后台引擎抓取最新历史记录并回传
+            fetchHistoryListFromEngine()
+            binding.tvUrlSubtitle.text = "历史 · 云端会议纪要卡片"
         }
 
         // Tab 3: 设置
@@ -316,6 +328,14 @@ class MainActivity : AppCompatActivity() {
 
     fun handleStartRecording() {
         if (isRecording) return
+
+        // 若当前听悟引擎明确处于未登录状态，直接阻断并引导用户去主页登录
+        if (currentEngineState == "need_login") {
+            Toast.makeText(this, "未检测到阿里云账号登录，请先在“主页”完成登录", Toast.LENGTH_LONG).show()
+            // 自动帮用户切换到主页，便于输入短信或扫码
+            binding.tabHome.performClick()
+            return
+        }
 
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
             != PackageManager.PERMISSION_GRANTED
@@ -418,6 +438,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     fun updateEngineState(state: String, desc: String) {
+        currentEngineState = state
         binding.uiWebView.evaluateJavascript(
             "window.onNativeEngineState && window.onNativeEngineState('$state', '$desc');",
             null
@@ -434,6 +455,35 @@ class MainActivity : AppCompatActivity() {
             .edit()
             .putBoolean(KEY_KEEP_SCREEN_ON, keepScreenOn)
             .apply()
+    }
+
+    // =========================================================
+    // 历史记录卡片双向通道
+    // =========================================================
+
+    fun fetchHistoryListFromEngine() {
+        binding.engineWebView.evaluateJavascript(
+            "window.fetchHistoryList && window.fetchHistoryList();",
+            null
+        )
+    }
+
+    fun relayHistoryListToUi(json: String) {
+        val escaped = json.replace("\\", "\\\\").replace("'", "\\'")
+        binding.uiWebView.evaluateJavascript(
+            "window.onNativeHistoryReceived && window.onNativeHistoryReceived('$escaped');",
+            null
+        )
+    }
+
+    fun handleOpenHistoryDetail(docId: String) {
+        Toast.makeText(this, "正在打开会议转写详情…", Toast.LENGTH_SHORT).show()
+        // 点击单项可在后台直接加载该详情页，并暂时切到全屏浏览
+        binding.uiWebView.visibility = View.INVISIBLE
+        binding.engineWebView.visibility = View.VISIBLE
+        if (docId.isNotEmpty() && !docId.startsWith("history_")) {
+            binding.engineWebView.loadUrl("https://tingwu.aliyun.com/doc/record/$docId")
+        }
     }
 
     fun reloadEngine() {

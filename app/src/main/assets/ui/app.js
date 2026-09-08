@@ -233,6 +233,99 @@
     }
   };
 
+  // =========================================================
+  // 5. 视图切换与历史会议移动端卡片渲染 (彻底告别裸露 PC 网页)
+  // =========================================================
+  const viewLive = document.getElementById('viewLive');
+  const viewHistory = document.getElementById('viewHistory');
+  const historyListContainer = document.getElementById('historyListContainer');
+  const historyEmptyState = document.getElementById('historyEmptyState');
+  const historyCountBadge = document.getElementById('historyCountBadge');
+  const btnRefreshHistory = document.getElementById('btnRefreshHistory');
+
+  if (btnRefreshHistory) {
+    btnRefreshHistory.addEventListener('click', () => {
+      if (window.TingwuBridge && window.TingwuBridge.fetchHistoryList) {
+        window.TingwuBridge.fetchHistoryList();
+      }
+    });
+  }
+
+  // 原生触发视图切换 ('live' | 'history')
+  window.onNativeSwitchView = function(viewName) {
+    console.log('[mytyty] 切换前台卡片视图:', viewName);
+    if (viewName === 'history') {
+      if (viewLive) {
+        viewLive.classList.remove('active');
+        viewLive.style.display = 'none';
+      }
+      if (viewHistory) {
+        viewHistory.classList.add('active');
+        viewHistory.style.display = 'block';
+      }
+      // 触发向后台拉取历史
+      if (window.TingwuBridge && window.TingwuBridge.fetchHistoryList) {
+        window.TingwuBridge.fetchHistoryList();
+      }
+    } else {
+      if (viewHistory) {
+        viewHistory.classList.remove('active');
+        viewHistory.style.display = 'none';
+      }
+      if (viewLive) {
+        viewLive.classList.add('active');
+        viewLive.style.display = 'block';
+      }
+    }
+  };
+
+  // 接收原生层传回的历史会议记录列表并渲染为精致移动卡片
+  window.onNativeHistoryReceived = function(jsonStr) {
+    try {
+      const list = typeof jsonStr === 'string' ? JSON.parse(jsonStr) : jsonStr;
+      if (!Array.isArray(list) || list.length === 0) {
+        if (historyEmptyState) historyEmptyState.style.display = 'flex';
+        if (historyCountBadge) historyCountBadge.textContent = '0 条记录';
+        return;
+      }
+
+      if (historyEmptyState) historyEmptyState.style.display = 'none';
+      if (historyCountBadge) historyCountBadge.textContent = `${list.length} 条记录`;
+
+      if (historyListContainer) {
+        // 保留空状态节点，移除旧卡片
+        const cards = historyListContainer.querySelectorAll('.history-item-card');
+        cards.forEach(c => c.remove());
+
+        list.forEach(item => {
+          const card = document.createElement('div');
+          card.className = 'history-item-card';
+          card.innerHTML = `
+            <div class="history-item-header">
+              <span class="history-item-title">${escapeHtml(item.title || '无标题会议')}</span>
+              <span class="history-item-badge">已完成</span>
+            </div>
+            <div class="history-item-meta">
+              <span>📅 ${escapeHtml(item.time || '刚刚')}</span>
+              <span>⏱ ${escapeHtml(item.duration || '00:00')}</span>
+            </div>
+            <div class="history-item-footer">
+              <button class="btn-view-detail" data-id="${escapeHtml(item.id || '')}">查看转写详情 ›</button>
+            </div>
+          `;
+          card.addEventListener('click', () => {
+            if (window.TingwuBridge && window.TingwuBridge.openHistoryDetail) {
+              window.TingwuBridge.openHistoryDetail(item.id || '');
+            }
+          });
+          historyListContainer.appendChild(card);
+        });
+      }
+    } catch (e) {
+      console.error('[mytyty] 解析历史记录异常:', e, jsonStr);
+    }
+  };
+
   function escapeHtml(str) {
     if (!str) return '';
     return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');

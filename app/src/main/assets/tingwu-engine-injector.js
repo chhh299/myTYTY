@@ -154,23 +154,65 @@
   }
 
   // =========================================================
-  // 3. 状态感知与无流看门狗
+  // 3. 状态感知与无流看门狗 (精准三位一体检测：登录按钮、用户头像、弹窗URL)
   // =========================================================
   function checkEngineState() {
     const url = window.location.href;
-    const isLoginUrl = url.includes('login') || url.includes('passport');
-    const hasLoginModal = document.querySelector('.aliyun-login-component-wrapper, .login-intercepts-modal-body, #alibaba-login-box');
+    const isLoginUrl = url.includes('login') || url.includes('passport') || url.includes('signin');
+    const hasLoginModal = document.querySelector(
+      '.aliyun-login-component-wrapper, .login-intercepts-modal-body, #alibaba-login-box, [class*="login-modal"], iframe[src*="login"]'
+    );
 
-    if (isLoginUrl || hasLoginModal) {
-      if (window.TingwuBridge && window.TingwuBridge.notifyEngineState) {
-        window.TingwuBridge.notifyEngineState('need_login', '请在主页登录');
-      }
-    } else {
-      if (window.TingwuBridge && window.TingwuBridge.notifyEngineState) {
-        window.TingwuBridge.notifyEngineState('ready', '听悟引擎就绪');
+    // 1. 检测页面上的登录/注册按钮或链接
+    let hasLoginBtn = false;
+    const potentialLoginEls = document.querySelectorAll('button, a, span, div[role="button"], [class*="login"]');
+    for (let el of potentialLoginEls) {
+      const txt = (el.innerText || '').trim();
+      if (
+        txt === '登录' ||
+        txt === '登录/注册' ||
+        txt === '立即登录' ||
+        txt === '去登录' ||
+        txt.includes('登录/注册') ||
+        txt === 'Sign In'
+      ) {
+        hasLoginBtn = true;
+        break;
       }
     }
+
+    // 2. 检测页面上的已登录标识 (用户头像、用户名、账号中心菜单)
+    const hasUserAvatar = document.querySelector(
+      '[class*="avatar"], [class*="user-avatar"], [class*="user-profile"], [class*="header-user"], [class*="userInfo"], img[class*="avatar"], .user-avatar-wrapper'
+    );
+
+    let state = 'ready';
+    let desc = '听悟引擎就绪';
+
+    if (isLoginUrl || hasLoginModal) {
+      state = 'need_login';
+      desc = '请在主页登录阿里云账号';
+    } else if (hasLoginBtn && !hasUserAvatar) {
+      // 明确有登录按钮且没有头像，属于未登录状态
+      state = 'need_login';
+      desc = '未登录，请在主页完成登录';
+    } else if (hasUserAvatar) {
+      // 明确有用户头像，属于已登录就绪状态
+      state = 'ready';
+      desc = '听悟已登录就绪';
+    } else {
+      // 正在加载中
+      state = 'loading';
+      desc = '听悟加载中…';
+    }
+
+    if (window.TingwuBridge && window.TingwuBridge.notifyEngineState) {
+      window.TingwuBridge.notifyEngineState(state, desc);
+    }
   }
+
+  // 暴露给原生层主动调用
+  window.checkEngineState = checkEngineState;
 
   // 20秒静默看门狗
   setInterval(() => {
@@ -212,13 +254,32 @@
     } catch (e) {}
   }
 
+  // 辅助函数：深度派发 React 兼容的鼠标点击事件 (解决 React 18 合成事件不触发问题)
+  function dispatchReactClick(element) {
+    try {
+      element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
+      element.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
+      element.click();
+    } catch (e) {
+      element.click();
+    }
+  }
+
   // 尝试在当前 DOM 中搜寻并点击“开始录音”按钮
   function tryClickStartRecordButton() {
-    // 策略 1: 文本精确/前缀匹配优先 (涵盖通义听悟桌面端所有入口)
-    const allElements = document.querySelectorAll('button, div[role="button"], a, span[role="button"], .ant-btn, [class*="btn"], [class*="card"]');
+    // 策略 1: 文本模糊加权匹配 (涵盖通义听悟桌面端所有入口，包括多行大卡片)
+    const allElements = document.querySelectorAll(
+      'button, div[role="button"], a, span[role="button"], .ant-btn, [class*="btn"], [class*="card"], div'
+    );
+
     for (let el of allElements) {
+      // 避免选中顶层包含所有文字的容器（body 或 container）
+      if (el.children && el.children.length > 5) continue;
+
       const txt = (el.innerText || '').trim();
-      // 匹配核心按钮文本
+      if (!txt) continue;
+
+      // 匹配首页大卡片或按钮文本
       if (
         txt === '开启实时记录' ||
         txt === '开始实时记录' ||
@@ -227,10 +288,10 @@
         txt === '开始录音' ||
         txt.includes('开启实时记录') ||
         txt.includes('开始实时记录') ||
+        (txt.includes('实时记录') && txt.includes('转写')) ||
         (txt.includes('开始') && txt.includes('记录'))
       ) {
-        // 如果是首页大卡片或按钮，模拟点击
-        el.click();
+        dispatchReactClick(el);
         console.log('[mytyty-engine] 成功命中并点击入口元素:', txt);
         confirmPreRecordingModals();
         sendAck(true);
@@ -243,7 +304,7 @@
       'button[class*="record"], button[aria-label*="录音"], .realtime-record-btn, [class*="start-record"], [class*="RecordBtn"], [class*="record-btn"], [class*="mic-btn"]'
     );
     for (let btn of specificButtons) {
-      btn.click();
+      dispatchReactClick(btn);
       console.log('[mytyty-engine] 命中专用录音按钮选择器');
       confirmPreRecordingModals();
       sendAck(true);
@@ -360,5 +421,46 @@
       btn.click();
     }
   });
+
+  // =========================================================
+  // 5. 历史记录数据提取与回传桥梁 (为移动端专属卡片提供真实数据)
+  // =========================================================
+  function extractHistoryListFromPage() {
+    const list = [];
+    try {
+      // 策略 1: 解析通义听悟工作台历史表格 / 列表项
+      const items = document.querySelectorAll(
+        '.ant-table-row, [class*="doc-item"], [class*="record-item"], [class*="history-item"], tr[data-row-key]'
+      );
+
+      items.forEach((row, idx) => {
+        const titleEl = row.querySelector('[class*="title"], [class*="name"], a, td:first-child');
+        const timeEl = row.querySelector('[class*="time"], [class*="date"], td:nth-child(2)');
+        const durationEl = row.querySelector('[class*="duration"], [class*="length"], td:nth-child(3)');
+
+        const title = titleEl ? (titleEl.innerText || '').trim() : '';
+        if (title && title.length > 0 && !title.includes('标题') && !title.includes('文档名称')) {
+          list.push({
+            id: row.getAttribute('data-row-key') || ('history_' + idx),
+            title: title,
+            time: timeEl ? (timeEl.innerText || '').trim() : '近期记录',
+            duration: durationEl ? (durationEl.innerText || '').trim() : '已转写'
+          });
+        }
+      });
+    } catch (e) {
+      console.warn('[mytyty-engine] 提取历史记录异常:', e);
+    }
+
+    if (window.TingwuBridge && window.TingwuBridge.onHistoryListReceived) {
+      window.TingwuBridge.onHistoryListReceived(JSON.stringify(list));
+    }
+  }
+
+  window.fetchHistoryList = function() {
+    console.log('[mytyty-engine] 收到拉取历史记录指令');
+    // 如果当前不在工作台或文档列表页，先在当前页提取，如为空且不在首页则视情况拉取
+    extractHistoryListFromPage();
+  };
 
 })();
