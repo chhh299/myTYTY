@@ -4,12 +4,12 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.pm.PackageManager
+import android.graphics.Typeface
 import android.os.Build
 import android.os.Bundle
 import android.view.View
 import android.view.WindowManager
 import android.webkit.CookieManager
-import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AlertDialog
@@ -161,7 +161,7 @@ class MainActivity : AppCompatActivity() {
     private fun setActiveTab(index: Int) {
         currentTabIndex = index
         val activeColor = ContextCompat.getColor(this, R.color.primary_dark)
-        val inactiveColor = ContextCompat.getColor(this, android.R.color.darker_gray)
+        val inactiveColor = ContextCompat.getColor(this, R.color.nav_inactive)
 
         val tabTexts = listOf(binding.tvTabHome, binding.tvTabLive, binding.tvTabHistory, binding.tvTabSettings)
         val tabDots = listOf(binding.dotHome, binding.dotLive, binding.dotHistory, binding.dotSettings)
@@ -169,11 +169,11 @@ class MainActivity : AppCompatActivity() {
         for (i in tabTexts.indices) {
             if (i == index) {
                 tabTexts[i].setTextColor(activeColor)
-                tabTexts[i].paint.isFakeBoldText = true
+                tabTexts[i].typeface = Typeface.DEFAULT_BOLD
                 tabDots[i].visibility = View.VISIBLE
             } else {
                 tabTexts[i].setTextColor(inactiveColor)
-                tabTexts[i].paint.isFakeBoldText = false
+                tabTexts[i].typeface = Typeface.DEFAULT
                 tabDots[i].visibility = View.INVISIBLE
             }
         }

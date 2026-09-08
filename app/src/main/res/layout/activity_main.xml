@@ -50,7 +50,7 @@
             android:layout_height="40dp"
             android:background="?attr/selectableItemBackgroundBorderless"
             android:src="@android:drawable/ic_menu_rotate"
-            android:tint="@color/primary_dark"
+            app:tint="@color/primary_dark"
             android:contentDescription="刷新" />
 
         <!-- 视口缩放切换按钮 (解决网页太宽/自适应切换) -->
@@ -60,7 +60,7 @@
             android:layout_height="40dp"
             android:background="?attr/selectableItemBackgroundBorderless"
             android:src="@android:drawable/ic_menu_view"
-            android:tint="@color/primary_dark"
+            app:tint="@color/primary_dark"
             android:contentDescription="切换缩放模式" />
 
         <!-- 更多设置按钮 -->
@@ -70,7 +70,7 @@
             android:layout_height="40dp"
             android:background="?attr/selectableItemBackgroundBorderless"
             android:src="@android:drawable/ic_menu_preferences"
-            android:tint="@color/primary_dark"
+            app:tint="@color/primary_dark"
             android:contentDescription="设置" />
     </LinearLayout>
 
