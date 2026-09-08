@@ -1,0 +1,72 @@
+package com.aliyun.tingwu.assistant.bridge
+
+import android.os.Handler
+import android.os.Looper
+import android.webkit.JavascriptInterface
+import com.aliyun.tingwu.assistant.MainActivity
+
+class TingwuBridge(
+    private val activity: MainActivity
+) {
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    /**
+     * 前台卡片 UI 点击“开始录音”
+     */
+    @JavascriptInterface
+    fun startRecording() {
+        mainHandler.post {
+            activity.handleStartRecording()
+        }
+    }
+
+    /**
+     * 前台卡片 UI 点击“结束录音”
+     */
+    @JavascriptInterface
+    fun stopRecording() {
+        mainHandler.post {
+            activity.handleStopRecording()
+        }
+    }
+
+    /**
+     * 后台听悟引擎捕获到实时语音识别与双语翻译数据包，向原生层回传
+     */
+    @JavascriptInterface
+    fun onTranscriptionReceived(json: String) {
+        mainHandler.post {
+            activity.relayTranscriptionToUi(json)
+        }
+    }
+
+    /**
+     * 后台听悟引擎上报连接或登录状态
+     */
+    @JavascriptInterface
+    fun notifyEngineState(state: String, desc: String) {
+        mainHandler.post {
+            activity.updateEngineState(state, desc)
+        }
+    }
+
+    /**
+     * 前台 UI 字号与常亮修改
+     */
+    @JavascriptInterface
+    fun updateSettings(fontSize: Int, keepScreenOn: Boolean) {
+        mainHandler.post {
+            activity.updateDisplaySettings(fontSize, keepScreenOn)
+        }
+    }
+
+    /**
+     * 重新刷新引擎
+     */
+    @JavascriptInterface
+    fun reloadEngine() {
+        mainHandler.post {
+            activity.reloadEngine()
+        }
+    }
+}

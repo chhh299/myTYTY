@@ -7,6 +7,8 @@ import android.content.pm.PackageManager
 import android.graphics.Typeface
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.View
 import android.view.WindowManager
 import android.webkit.CookieManager
@@ -16,7 +18,10 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import com.aliyun.tingwu.assistant.audio.AudioRecorderManager
+import com.aliyun.tingwu.assistant.bridge.TingwuBridge
 import com.aliyun.tingwu.assistant.databinding.ActivityMainBinding
+import com.aliyun.tingwu.assistant.service.RecordingService
 import com.aliyun.tingwu.assistant.webview.DesktopSpoofHelper
 import com.aliyun.tingwu.assistant.webview.TingwuWebChromeClient
 import com.aliyun.tingwu.assistant.webview.TingwuWebViewClient
@@ -29,136 +34,159 @@ class MainActivity : AppCompatActivity() {
         private const val TINGWU_RECORD_URL = "https://tingwu.aliyun.com/doc/record"
         private const val PREFS_NAME = "mytyty_settings"
         private const val KEY_KEEP_SCREEN_ON = "keep_screen_on"
-        private const val KEY_ZOOM_LARGE = "zoom_large"
     }
 
     private lateinit var binding: ActivityMainBinding
+    private lateinit var bridge: TingwuBridge
+    private lateinit var audioRecorderManager: AudioRecorderManager
+
+    private var isRecording = false
+    private var recordSeconds = 0
     private var backPressedTime = 0L
-    private var currentTabIndex = 0
-    private var isZoomLarge = false
-    private var isKeepScreenOn = true
+    private var currentTabIndex = 1 // 默认停留在 Tab 2: 实时极简卡片界面
+
+    private val timerHandler = Handler(Looper.getMainLooper())
+    private val timerRunnable = object : Runnable {
+        override fun run() {
+            if (isRecording) {
+                recordSeconds++
+                val timeStr = formatTimer(recordSeconds)
+                binding.uiWebView.evaluateJavascript(
+                    "window.onNativeTimerTick && window.onNativeTimerTick('$timeStr');",
+                    null
+                )
+                timerHandler.postDelayed(this, 1000)
+            }
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        loadSettings()
-        applyKeepScreenOn(isKeepScreenOn)
+        bridge = TingwuBridge(this)
+        audioRecorderManager = AudioRecorderManager(this)
+
+        val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val keepScreenOn = prefs.getBoolean(KEY_KEEP_SCREEN_ON, true)
+        updateDisplaySettings(120, keepScreenOn)
 
         initCookieManager()
-        setupMainWebView()
+        setupUiWebView()
+        setupEngineWebView()
         setupTopBar()
         setupBottomNav()
         setupBackNavigation()
         requestAppPermissions()
 
-        // 默认加载通义听悟官方主页
-        binding.mainWebView.loadUrl(TINGWU_HOME_URL)
+        // 默认显示 Tab 2: 实时极简卡片，引擎在后台准备
+        switchTab(1)
     }
 
     private fun initCookieManager() {
         val cookieManager = CookieManager.getInstance()
         cookieManager.setAcceptCookie(true)
-        cookieManager.setAcceptThirdPartyCookies(binding.mainWebView, true)
+        cookieManager.setAcceptThirdPartyCookies(binding.engineWebView, true)
     }
 
     @SuppressLint("SetJavaScriptEnabled")
-    private fun setupMainWebView() {
-        val webView = binding.mainWebView
-        DesktopSpoofHelper.setupDesktopSettings(webView)
-
-        if (isZoomLarge) {
-            webView.settings.textZoom = 125
-        } else {
-            webView.settings.textZoom = 100
+    private fun setupUiWebView() {
+        binding.uiWebView.apply {
+            settings.javaScriptEnabled = true
+            settings.domStorageEnabled = true
+            settings.allowFileAccess = true
+            addJavascriptInterface(bridge, "TingwuBridge")
+            // 加载纯净的移动卡片 UI
+            loadUrl("file:///android_asset/ui/index.html")
         }
+    }
 
-        webView.webViewClient = TingwuWebViewClient(this) { isLoading, url ->
+    @SuppressLint("SetJavaScriptEnabled")
+    private fun setupEngineWebView() {
+        val engine = binding.engineWebView
+        DesktopSpoofHelper.setupDesktopSettings(engine)
+
+        engine.addJavascriptInterface(bridge, "TingwuBridge")
+
+        engine.webViewClient = TingwuWebViewClient(this) { isLoading, url ->
             binding.pageProgressBar.visibility = if (isLoading) View.VISIBLE else View.GONE
-            updateUrlSubtitle(url)
+            if (url.contains("login") || url.contains("passport")) {
+                binding.uiWebView.evaluateJavascript(
+                    "window.onNativeEngineState && window.onNativeEngineState('need_login', '需登录阿里云');",
+                    null
+                )
+            } else if (!isLoading && url.contains("tingwu.aliyun.com")) {
+                binding.uiWebView.evaluateJavascript(
+                    "window.onNativeEngineState && window.onNativeEngineState('ready', '听悟已就绪');",
+                    null
+                )
+            }
         }
 
-        webView.webChromeClient = TingwuWebChromeClient { progress ->
+        engine.webChromeClient = TingwuWebChromeClient { progress ->
             binding.pageProgressBar.progress = progress
             if (progress >= 100) {
                 binding.pageProgressBar.visibility = View.GONE
             }
         }
+
+        // 后台静默加载真实通义听悟
+        engine.loadUrl(TINGWU_HOME_URL)
     }
 
     private fun setupTopBar() {
-        // 刷新按钮
         binding.btnRefreshPage.setOnClickListener {
-            binding.mainWebView.reload()
-            Toast.makeText(this, "正在刷新听悟页面…", Toast.LENGTH_SHORT).show()
+            reloadEngine()
+            binding.uiWebView.reload()
+            Toast.makeText(this, "正在重新连接听悟引擎…", Toast.LENGTH_SHORT).show()
         }
 
-        // 视口文字放大切换
-        binding.btnToggleZoom.setOnClickListener {
-            isZoomLarge = !isZoomLarge
-            binding.mainWebView.settings.textZoom = if (isZoomLarge) 125 else 100
-            saveBooleanSetting(KEY_ZOOM_LARGE, isZoomLarge)
-            val tip = if (isZoomLarge) "已切换至大字号排版 (125%)" else "已恢复标准字号 (100%)"
-            Toast.makeText(this, tip, Toast.LENGTH_SHORT).show()
-        }
-
-        // 设置入口
         binding.btnOpenSettings.setOnClickListener {
             showSettingsDialog()
         }
     }
 
     private fun setupBottomNav() {
-        // Tab 1: 主页 (用于查看主页、登录账号、查看工作台)
+        // Tab 1: 主页 (展示官方主页，用于登录账号、解决短信验证码、管理个人空间)
         binding.tabHome.setOnClickListener {
-            setActiveTab(0)
-            val currentUrl = binding.mainWebView.url ?: ""
-            if (!currentUrl.contains("tingwu.aliyun.com/home")) {
-                binding.mainWebView.loadUrl(TINGWU_HOME_URL)
-            } else {
-                binding.mainWebView.evaluateJavascript("window.scrollTo({top: 0, behavior: 'smooth'});", null)
+            switchTab(0)
+            binding.uiWebView.visibility = View.GONE
+            binding.engineWebView.visibility = View.VISIBLE
+            val currUrl = binding.engineWebView.url ?: ""
+            if (!currUrl.contains("tingwu.aliyun.com/home")) {
+                binding.engineWebView.loadUrl(TINGWU_HOME_URL)
             }
+            binding.tvUrlSubtitle.text = "主页 · 账号登录与工作台"
         }
 
-        // Tab 2: 实时 (进入实时语音识别与中英翻译工作台)
+        // Tab 2: 实时 (专属移动端极简卡片，实时录音、双语字幕与双语翻译)
         binding.tabLive.setOnClickListener {
-            setActiveTab(1)
-            // 优先通过脚本触发当前页面的“实时记录”卡片，若不在主页则直接路由至录音页
-            val triggerJs = """
-                (function() {
-                    if (window.__mytytyGotoLiveRecord && window.__mytytyGotoLiveRecord()) {
-                        return 'clicked';
-                    } else {
-                        window.location.href = '$TINGWU_RECORD_URL';
-                        return 'routed';
-                    }
-                })();
-            """.trimIndent()
-            binding.mainWebView.evaluateJavascript(triggerJs) {
-                Toast.makeText(this, "正在进入实时录音与翻译工作台…", Toast.LENGTH_SHORT).show()
-            }
+            switchTab(1)
+            binding.engineWebView.visibility = View.GONE
+            binding.uiWebView.visibility = View.VISIBLE
+            binding.tvUrlSubtitle.text = "极简卡片 · 实时录音与翻译"
         }
 
-        // Tab 3: 历史 (查看云端保存的历史会议与转写文档列表)
+        // Tab 3: 历史 (查看云端已保存的历史会议纪要)
         binding.tabHistory.setOnClickListener {
-            setActiveTab(2)
-            val currentUrl = binding.mainWebView.url ?: ""
-            if (currentUrl.contains("tingwu.aliyun.com/home")) {
-                binding.mainWebView.evaluateJavascript("window.__mytytyScrollToHistory && window.__mytytyScrollToHistory();", null)
-            } else {
-                binding.mainWebView.loadUrl(TINGWU_HOME_URL)
-            }
+            switchTab(2)
+            binding.uiWebView.visibility = View.GONE
+            binding.engineWebView.visibility = View.VISIBLE
+            binding.engineWebView.evaluateJavascript(
+                "window.__mytytyScrollToHistory && window.__mytytyScrollToHistory();",
+                null
+            )
+            binding.tvUrlSubtitle.text = "历史 · 云端会议与文档记录"
         }
 
-        // Tab 4: 设置 (屏幕常亮、字体、缓存清理等)
+        // Tab 4: 设置 (屏幕常亮、麦克风输入与关于)
         binding.tabSettings.setOnClickListener {
-            setActiveTab(3)
             showSettingsDialog()
         }
     }
 
-    private fun setActiveTab(index: Int) {
+    private fun switchTab(index: Int) {
         currentTabIndex = index
         val activeColor = ContextCompat.getColor(this, R.color.primary_dark)
         val inactiveColor = ContextCompat.getColor(this, R.color.nav_inactive)
@@ -179,56 +207,150 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun updateUrlSubtitle(url: String) {
-        val cleanSub = when {
-            url.contains("/doc/record") || url.contains("/doc/live") -> "实时录音工作台"
-            url.contains("/home") -> "tingwu.aliyun.com/home"
-            url.contains("login") || url.contains("passport") -> "阿里云安全登录"
-            else -> "tingwu.aliyun.com"
+    // =========================================================
+    // 真实录音与 WebRTC 硬件生命周期联动
+    // =========================================================
+
+    fun handleStartRecording() {
+        if (isRecording) return
+
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            requestAppPermissions()
+            Toast.makeText(this, "请先授予麦克风权限", Toast.LENGTH_SHORT).show()
+            return
         }
-        binding.tvUrlSubtitle.text = cleanSub
+
+        isRecording = true
+        recordSeconds = 0
+
+        // 1. 启动前台保活服务
+        RecordingService.startService(this)
+
+        // 2. 激活蓝牙 SCO 耳机麦克风拾音
+        audioRecorderManager.startBluetoothSco()
+
+        // 3. 启动本地双录 AAC 防灾备份
+        audioRecorderManager.startLocalBackupRecording()
+
+        // 4. 指挥后台真实的通义听悟 PC 网页开启录音
+        binding.engineWebView.evaluateJavascript(
+            "window.__tingwuController && window.__tingwuController.startRecording();",
+            null
+        )
+
+        // 5. 启动计时器并通知前台卡片 UI 切换状态
+        timerHandler.post(timerRunnable)
+        binding.uiWebView.evaluateJavascript(
+            "window.onNativeRecordingStatus && window.onNativeRecordingStatus(true);",
+            null
+        )
+        binding.uiWebView.evaluateJavascript(
+            "window.onNativeTimerTick && window.onNativeTimerTick('00:00:00');",
+            null
+        )
+    }
+
+    fun handleStopRecording() {
+        if (!isRecording) return
+
+        isRecording = false
+
+        // 1. 停止前台保活服务
+        RecordingService.stopService(this)
+
+        // 2. 释放蓝牙与本地录音备份
+        audioRecorderManager.stopBluetoothSco()
+        audioRecorderManager.stopLocalBackupRecording()
+
+        // 3. 指挥后台通义听悟网页停止录音
+        binding.engineWebView.evaluateJavascript(
+            "window.__tingwuController && window.__tingwuController.stopRecording();",
+            null
+        )
+
+        // 4. 停止计时器并通知前台 UI
+        timerHandler.removeCallbacks(timerRunnable)
+        binding.uiWebView.evaluateJavascript(
+            "window.onNativeRecordingStatus && window.onNativeRecordingStatus(false);",
+            null
+        )
+    }
+
+    // =========================================================
+    // 数据穿透：后台听悟截获的实时转写 JSON $\rightarrow$ 原生中继 $\rightarrow$ 前台卡片渲染
+    // =========================================================
+
+    fun relayTranscriptionToUi(json: String) {
+        val escaped = json.replace("\\", "\\\\").replace("'", "\\'")
+        binding.uiWebView.evaluateJavascript(
+            "window.onNativeTranscriptionReceived && window.onNativeTranscriptionReceived('$escaped');",
+            null
+        )
+    }
+
+    fun updateEngineState(state: String, desc: String) {
+        binding.uiWebView.evaluateJavascript(
+            "window.onNativeEngineState && window.onNativeEngineState('$state', '$desc');",
+            null
+        )
+    }
+
+    fun updateDisplaySettings(fontSize: Int, keepScreenOn: Boolean) {
+        if (keepScreenOn) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        } else {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+        getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean(KEY_KEEP_SCREEN_ON, keepScreenOn)
+            .apply()
+    }
+
+    fun reloadEngine() {
+        binding.engineWebView.reload()
     }
 
     private fun showSettingsDialog() {
+        val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val isKeep = prefs.getBoolean(KEY_KEEP_SCREEN_ON, true)
+
         val options = arrayOf(
-            "会议屏幕常亮: ${if (isKeepScreenOn) "已开启" else "已关闭"}",
-            "页面排版字号: ${if (isZoomLarge) "大字号 (125%)" else "标准 (100%)"}",
-            "重新加载通义听悟",
-            "清除登录缓存并重新登录",
+            "会议防息屏常亮: ${if (isKeep) "已开启" else "已关闭"}",
+            "重新加载听悟引擎",
+            "清除登录 Cookie 重新登录",
             "关于 mytyty"
         )
 
         AlertDialog.Builder(this)
-            .setTitle("mytyty 设置与辅助")
+            .setTitle("设置与选项")
             .setItems(options) { _, which ->
                 when (which) {
                     0 -> {
-                        isKeepScreenOn = !isKeepScreenOn
-                        applyKeepScreenOn(isKeepScreenOn)
-                        saveBooleanSetting(KEY_KEEP_SCREEN_ON, isKeepScreenOn)
-                        Toast.makeText(this, "屏幕常亮已${if (isKeepScreenOn) "开启" else "关闭"}", Toast.LENGTH_SHORT).show()
+                        val newKeep = !isKeep
+                        updateDisplaySettings(120, newKeep)
+                        Toast.makeText(this, "屏幕常亮已${if (newKeep) "开启" else "关闭"}", Toast.LENGTH_SHORT).show()
                     }
                     1 -> {
-                        isZoomLarge = !isZoomLarge
-                        binding.mainWebView.settings.textZoom = if (isZoomLarge) 125 else 100
-                        saveBooleanSetting(KEY_ZOOM_LARGE, isZoomLarge)
-                        Toast.makeText(this, if (isZoomLarge) "已切换至大字号" else "已恢复标准字号", Toast.LENGTH_SHORT).show()
+                        reloadEngine()
+                        Toast.makeText(this, "正在刷新听悟引擎…", Toast.LENGTH_SHORT).show()
                     }
                     2 -> {
-                        binding.mainWebView.reload()
-                        Toast.makeText(this, "正在刷新页面…", Toast.LENGTH_SHORT).show()
-                    }
-                    3 -> {
                         CookieManager.getInstance().removeAllCookies(null)
                         CookieManager.getInstance().flush()
-                        binding.mainWebView.clearCache(true)
-                        binding.mainWebView.loadUrl(TINGWU_HOME_URL)
-                        Toast.makeText(this, "已清除缓存，正在进入登录页面…", Toast.LENGTH_SHORT).show()
+                        binding.engineWebView.clearCache(true)
+                        binding.engineWebView.loadUrl(TINGWU_HOME_URL)
+                        switchTab(0)
+                        binding.uiWebView.visibility = View.GONE
+                        binding.engineWebView.visibility = View.VISIBLE
+                        Toast.makeText(this, "已清除缓存，请在主页登录", Toast.LENGTH_SHORT).show()
                     }
-                    4 -> {
+                    3 -> {
                         AlertDialog.Builder(this)
                             .setTitle("关于 mytyty")
-                            .setMessage("mytyty v1.0.0\n\n- 深度伪装 Windows 11 Chrome 桌面环境\n- 适配阿里云短信验证码登录\n- 原生 WebRTC 麦克风音频直通\n- 会议长程屏幕防息屏常亮")
+                            .setMessage("mytyty v1.0.0\n\n- 定制原生卡片 UI\n- 深度伪装 Windows 11 Chrome\n- 适配阿里云短信验证码展示\n- 真实 WebRTC 物理麦克风穿透")
                             .setPositiveButton("确定", null)
                             .show()
                     }
@@ -238,32 +360,23 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
-    private fun applyKeepScreenOn(keep: Boolean) {
-        if (keep) {
-            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        } else {
-            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        }
-    }
-
-    private fun loadSettings() {
-        val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        isKeepScreenOn = prefs.getBoolean(KEY_KEEP_SCREEN_ON, true)
-        isZoomLarge = prefs.getBoolean(KEY_ZOOM_LARGE, false)
-    }
-
-    private fun saveBooleanSetting(key: String, value: Boolean) {
-        getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .edit()
-            .putBoolean(key, value)
-            .apply()
+    private fun formatTimer(totalSec: Int): String {
+        val h = totalSec / 3600
+        val m = (totalSec % 3600) / 60
+        val s = totalSec % 60
+        return String.format("%02d:%02d:%02d", h, m, s)
     }
 
     private fun setupBackNavigation() {
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
-                if (binding.mainWebView.canGoBack()) {
-                    binding.mainWebView.goBack()
+                if (currentTabIndex != 1) {
+                    // 如果在主页或历史，按返回键切回实时卡片页
+                    switchTab(1)
+                    binding.engineWebView.visibility = View.GONE
+                    binding.uiWebView.visibility = View.VISIBLE
+                } else if (binding.engineWebView.canGoBack()) {
+                    binding.engineWebView.goBack()
                 } else {
                     val currentTime = System.currentTimeMillis()
                     if (currentTime - backPressedTime < 2000) {
@@ -305,7 +418,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
-        binding.mainWebView.destroy()
+        timerHandler.removeCallbacks(timerRunnable)
+        if (isRecording) {
+            handleStopRecording()
+        }
+        binding.uiWebView.destroy()
+        binding.engineWebView.destroy()
         super.onDestroy()
     }
 }

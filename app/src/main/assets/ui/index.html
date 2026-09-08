@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>mytyty</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- 手机端原生 App 极简卡片容器 (无任何虚假 9:41/wifi/电池状态栏，由系统状态栏原生呈现) -->
+  <div class="app-container">
+
+    <!-- 顶部状态指示栏 -->
+    <header class="app-header">
+      <div class="header-left">
+        <span class="app-name">mytyty</span>
+        <span class="header-badge" id="engineStatusBadge">● 引擎连接中</span>
+      </div>
+      <div class="header-right">
+        <button class="icon-btn" id="btnRefresh" title="刷新">
+          <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M17.65 6.35A7.958 7.958 0 0 0 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 1 12 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- 可滚动卡片内容区 -->
+    <main class="content-scroll">
+
+      <!-- 1. 实时记录控制卡片 -->
+      <section class="card record-card">
+        <div class="card-header">
+          <div class="card-title-group">
+            <span class="card-title">实时记录</span>
+            <span class="sub-status" id="micStatusText">电脑模式 · 麦克风待命</span>
+          </div>
+          <span class="record-timer" id="mainRecordTimer">00:00:00</span>
+        </div>
+
+        <div class="record-action-area">
+          <button class="btn-record-main" id="btnToggleRecord">
+            <div class="record-btn-icon" id="recordBtnIcon"></div>
+            <span id="recordBtnLabel">开始实时记录</span>
+          </button>
+        </div>
+      </section>
+
+      <!-- 2. 实时字幕卡片 (原文与翻译流) -->
+      <section class="card subtitle-card">
+        <div class="card-header">
+          <div class="tab-pill-group">
+            <button class="pill-tab active" data-mode="bilingual">双语对照</button>
+            <button class="pill-tab" data-mode="original">原文</button>
+            <button class="pill-tab" data-mode="translation">翻译</button>
+          </div>
+          <div class="live-indicator" id="liveIndicator" style="display: none;">
+            <span class="sound-wave"></span>
+            <span class="sound-wave"></span>
+            <span class="sound-wave"></span>
+            <span class="sound-wave"></span>
+            <span class="indicator-text">正在识别</span>
+          </div>
+        </div>
+
+        <!-- 实时转写与字幕展示容器 (绝无任何虚假写死静态文本) -->
+        <div class="transcript-stream-container" id="transcriptContainer">
+          <div class="empty-state" id="transcriptEmptyState">
+            <svg viewBox="0 0 24 24" width="36" height="36" class="empty-icon"><path fill="currentColor" d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/><path fill="currentColor" d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/></svg>
+            <p class="empty-tip">点击上方“开始实时记录”，通义听悟实时转写与翻译结果将在此直接呈现</p>
+          </div>
+          <div class="stream-sentences" id="streamSentences"></div>
+        </div>
+      </section>
+
+      <!-- 3. 显示设置卡片 (字号与常亮) -->
+      <section class="card settings-card">
+        <div class="setting-item">
+          <div class="setting-label">
+            <span class="setting-title">字幕排版字号</span>
+            <span class="setting-desc" id="currentFontSizeLabel">120% (标准偏大)</span>
+          </div>
+          <div class="font-stepper">
+            <button class="stepper-btn" id="btnFontMinus">-</button>
+            <button class="stepper-btn" id="btnFontPlus">+</button>
+          </div>
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="setting-item">
+          <div class="setting-label">
+            <span class="setting-title">会议屏幕常亮</span>
+            <span class="setting-desc">防止会议中途锁屏导致识别断流</span>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="chkKeepScreenOn" checked>
+            <span class="slider round"></span>
+          </label>
+        </div>
+      </section>
+
+    </main>
+
+    <!-- 4. 录音中常驻悬浮底栏 (仅在录音中弹出，未录音时隐藏) -->
+    <div class="floating-record-bar" id="floatingRecordBar" style="display: none;">
+      <div class="floating-bar-content">
+        <div class="floating-pulse-dot"></div>
+        <div class="floating-info">
+          <span class="floating-timer" id="floatingTimer">00:00:00</span>
+          <span class="floating-desc">实时会议录音中…</span>
+        </div>
+        <button class="btn-floating-stop" id="btnFloatingStop">结束录音</button>
+      </div>
+    </div>
+
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
