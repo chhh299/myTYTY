@@ -75,10 +75,25 @@ class MainActivity : AppCompatActivity() {
     private var connectivityManager: ConnectivityManager? = null
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
 
+    // 录音握手安全看门狗：防止网络卡顿或页面未响应导致 UI 永远卡死在“正在连接引擎…”
+    private val ackWatchdogRunnable = Runnable {
+        if (!isRecording) {
+            binding.uiWebView.evaluateJavascript(
+                "window.onNativeRecordingPending && window.onNativeRecordingPending(false);",
+                null
+            )
+            RecordingService.stopService(this@MainActivity)
+            Toast.makeText(this@MainActivity, "连接听悟引擎超时，请检查网络或在“主页”确认登录状态", Toast.LENGTH_LONG).show()
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+
+        // 开启 Chrome 远程调试开关，可通过电脑 chrome://inspect 排查听悟控制台与网络
+        WebView.setWebContentsDebuggingEnabled(true)
 
         bridge = TingwuBridge(this)
 
@@ -317,7 +332,11 @@ class MainActivity : AppCompatActivity() {
         // 1. 启动前台保活服务 (持 WakeLock)
         RecordingService.startService(this)
 
-        // 2. 指挥后台真实的通义听悟 PC 网页开启录音
+        // 2. 启动 8 秒看门狗，防止未响应导致界面一直死锁在“正在连接引擎…”
+        timerHandler.removeCallbacks(ackWatchdogRunnable)
+        timerHandler.postDelayed(ackWatchdogRunnable, 8000)
+
+        // 3. 指挥后台真实的通义听悟 PC 网页开启录音
         binding.engineWebView.evaluateJavascript(
             "window.__tingwuController && window.__tingwuController.startRecording();",
             null
@@ -328,6 +347,8 @@ class MainActivity : AppCompatActivity() {
      * 收到后台听悟网页的真实 ACK 确认后，才正式翻转状态并开始计时
      */
     fun handleRecordingAck(started: Boolean) {
+        timerHandler.removeCallbacks(ackWatchdogRunnable)
+
         if (started) {
             isRecording = true
             recordSeconds = 0

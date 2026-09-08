@@ -185,64 +185,127 @@
   }, 10000);
 
   // =========================================================
-  // 4. 多模态录音控制选择器与双向 ACK 协议 (解决 P1-1 虚假录音缺陷)
+  // 4. 多模态录音控制选择器与双向 ACK 协议 (解决真实录音触发与页面跳转无缝衔接)
   // =========================================================
   window.__isRecordingActive = false;
+
+  // 页面加载完成后，检查是否有由主页跳转工作台发起的“自启动录音任务”
+  function checkPendingAutoRecordTask() {
+    try {
+      const pendingTask = sessionStorage.getItem('__mytyty_pending_auto_record');
+      if (pendingTask === '1') {
+        sessionStorage.removeItem('__mytyty_pending_auto_record');
+        console.log('[mytyty-engine] 感知到工作台重定向自启动录音任务，开始尝试点击');
+        let retryCount = 0;
+        const autoInterval = setInterval(() => {
+          retryCount++;
+          const success = tryClickStartRecordButton();
+          if (success || retryCount > 15) {
+            clearInterval(autoInterval);
+            if (!success) {
+              console.warn('[mytyty-engine] 工作台自启动录音重试超时');
+              sendAck(false);
+            }
+          }
+        }, 500);
+      }
+    } catch (e) {}
+  }
+
+  // 尝试在当前 DOM 中搜寻并点击“开始录音”按钮
+  function tryClickStartRecordButton() {
+    // 策略 1: 文本精确/前缀匹配优先
+    const allButtons = document.querySelectorAll('button, div[role="button"], a, span[role="button"]');
+    for (let btn of allButtons) {
+      const txt = (btn.innerText || '').trim();
+      if (
+        txt === '开启实时记录' ||
+        txt === '开始实时记录' ||
+        txt === '开始记录' ||
+        txt === '实时记录' ||
+        txt === '开始录音' ||
+        txt.includes('开启实时记录') ||
+        txt.includes('开始实时记录') ||
+        (txt.includes('开始') && txt.includes('记录'))
+      ) {
+        btn.click();
+        console.log('[mytyty-engine] 成功命中并点击文字按钮:', txt);
+        confirmPreRecordingModals();
+        sendAck(true);
+        return true;
+      }
+    }
+
+    // 策略 2: 类名与无障碍属性定位 (针对工作台专用录音按钮)
+    const specificButtons = document.querySelectorAll(
+      'button[class*="record"], button[aria-label*="录音"], .realtime-record-btn, [class*="start-record"], [class*="RecordBtn"], [class*="record-btn"]'
+    );
+    for (let btn of specificButtons) {
+      btn.click();
+      console.log('[mytyty-engine] 命中专用录音按钮选择器');
+      confirmPreRecordingModals();
+      sendAck(true);
+      return true;
+    }
+
+    return false;
+  }
 
   window.__tingwuController = {
     startRecording: function() {
       console.log('[mytyty-engine] 执行开始录音指令');
       lastStreamActiveTime = Date.now();
 
-      // 辅助函数：判断元素是否在页面中可见且未被隐藏 (优化 P2-1)
-      function isElementVisible(el) {
-        if (!el) return false;
-        return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
-      }
-
-      // 策略 1: 文本精确/前缀匹配优先 (避免宽通配命中无关小按钮)
-      const allButtons = document.querySelectorAll('button, div[role="button"], a');
-      for (let btn of allButtons) {
-        if (!isElementVisible(btn)) continue;
-        const txt = (btn.innerText || '').trim();
-        if (txt === '开启实时记录' || txt === '开始实时记录' || txt === '开始记录' || txt === '实时记录' || txt.includes('开始录音')) {
-          btn.click();
-          console.log('[mytyty-engine] 优先命中文字按钮:', txt);
-          confirmPreRecordingModals();
-          sendAck(true);
-          return true;
-        }
-      }
-
-      // 策略 2: 类名与无障碍属性定位 (针对工作台专用录音按钮)
-      const specificButtons = document.querySelectorAll(
-        'button[class*="record"], button[aria-label*="录音"], .realtime-record-btn, [class*="start-record"]'
-      );
-      for (let btn of specificButtons) {
-        if (!isElementVisible(btn)) continue;
-        btn.click();
-        console.log('[mytyty-engine] 命中专用录音按钮选择器');
-        confirmPreRecordingModals();
-        sendAck(true);
+      // 先在当前页面尝试搜寻并点击录音按钮
+      if (tryClickStartRecordButton()) {
         return true;
       }
 
-      // 策略 3: 若不在工作台，自动路由至听悟官方录音工作台
+      // 若当前在首页(/home)或非录音工作台，标记任务并跳转到听悟官方录音工作台
       if (!window.location.href.includes('/doc/record')) {
-        console.log('[mytyty-engine] 未在当前页面找到录音按钮，自动跳转至工作台');
+        console.log('[mytyty-engine] 当前页面无录音按钮，设置自启动标记并跳转至工作台');
+        try {
+          sessionStorage.setItem('__mytyty_pending_auto_record', '1');
+        } catch (e) {}
         window.location.href = 'https://tingwu.aliyun.com/doc/record';
         return true;
       }
 
-      sendAck(false);
+      // 如果已经在 /doc/record 仍未找到按钮，延时重试 3 次后再判失败
+      let retries = 0;
+      const retryTimer = setInterval(() => {
+        retries++;
+        if (tryClickStartRecordButton()) {
+          clearInterval(retryTimer);
+        } else if (retries >= 3) {
+          clearInterval(retryTimer);
+          console.warn('[mytyty-engine] 未在页面上找到录音按钮');
+          sendAck(false);
+        }
+      }, 600);
+
       return false;
     },
 
     stopRecording: function() {
       console.log('[mytyty-engine] 执行结束录音指令');
       window.__isRecordingActive = false;
+      try {
+        sessionStorage.removeItem('__mytyty_pending_auto_record');
+      } catch (e) {}
 
-      // 策略 1: 类名定位
+      // 策略 1: 文本定位
+      const allButtons = document.querySelectorAll('button, div[role="button"], a, span[role="button"]');
+      for (let btn of allButtons) {
+        const txt = (btn.innerText || '').trim();
+        if (txt === '结束记录' || txt === '结束' || txt === '停止' || txt.includes('完成') || txt.includes('结束录音') || txt.includes('停止录音')) {
+          btn.click();
+          console.log('[mytyty-engine] 成功点击结束录音按钮:', txt);
+          return true;
+        }
+      }
+
+      // 策略 2: 类名定位
       const stopButtons = document.querySelectorAll(
         'button[class*="stop"], button[class*="finish"], [class*="stop-record"], [class*="finish-record"]'
       );
@@ -251,19 +314,11 @@
         return true;
       }
 
-      // 策略 2: 文本定位
-      const allButtons = document.querySelectorAll('button, div[role="button"], a');
-      for (let btn of allButtons) {
-        const txt = (btn.innerText || '').trim();
-        if (txt === '结束记录' || txt === '结束' || txt === '停止' || txt.includes('完成') || txt.includes('结束录音')) {
-          btn.click();
-          console.log('[mytyty-engine] 成功点击结束录音按钮:', txt);
-          return true;
-        }
-      }
       return false;
     }
   };
+
+  checkPendingAutoRecordTask();
 
   function sendAck(started) {
     window.__isRecordingActive = started;
