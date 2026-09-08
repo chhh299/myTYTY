@@ -49,7 +49,7 @@ class MainActivity : AppCompatActivity() {
     private var recordSeconds = 0
     private var backPressedTime = 0L
     private var currentTabIndex = 1 // 默认停留在 Tab 1: 实时极简卡片界面
-    private var currentEngineState = "loading" // 由网页注入感知器更新：loading | need_login | ready
+    private var currentEngineState = "ready" // 默认就绪，由网页注入感知器实时更新：loading | need_login | ready
 
     private val timerHandler = Handler(Looper.getMainLooper())
     private val timerRunnable = object : Runnable {
@@ -183,17 +183,17 @@ class MainActivity : AppCompatActivity() {
             binding.pageProgressBar.visibility = if (isLoading) View.VISIBLE else View.GONE
 
             if (isLoading) {
-                // 加载中，只更新状态为 loading，绝不提前虚假判定为 ready
-                binding.uiWebView.evaluateJavascript(
-                    "window.onNativeEngineState && window.onNativeEngineState('loading', '听悟连接中…');",
-                    null
-                )
+                // 仅网络完全断开或跳转独立登录页时标记，普通导航不随意阻断 UI
+                if (url.contains("login") || url.contains("passport")) {
+                    updateEngineState("need_login", "需登录阿里云")
+                }
             } else {
                 // 页面加载完成，触发注入脚本执行精准 DOM 状态检测 (由 Bridge 统一上报真实 need_login 或 ready)
                 binding.engineWebView.evaluateJavascript(
                     "window.checkEngineState && window.checkEngineState();",
                     null
                 )
+                fetchHistoryListFromEngine()
             }
 
             // 登录弹窗/独立登录页深度自适应接管

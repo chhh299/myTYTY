@@ -144,9 +144,7 @@
   // =========================================================
   // 3. 真实状态检测 (登录态与工作台判定)
   // =========================================================
-  let lastNotifiedState = '';
-
-  function checkEngineState(force) {
+  function checkEngineState() {
     const url = window.location.href;
     const isLoginUrl = url.includes('login') || url.includes('passport') || url.includes('signin');
     const hasLoginModal = document.querySelector(
@@ -163,11 +161,11 @@
       }
     }
 
-    // 检查是否有登录鉴权 Cookie
+    // 检查是否有登录鉴权 Cookie (cna 是通用设备标识，只有 login_aliyunid、munb、login_current_pk 才是真实登录态凭证)
     let hasAuthCookie = false;
     try {
       const cookie = document.cookie || '';
-      if (cookie.includes('login_aliyunid') || cookie.includes('munb') || cookie.includes('cna') || cookie.includes('login_current_pk')) {
+      if (cookie.includes('login_aliyunid') || cookie.includes('munb') || cookie.includes('login_current_pk')) {
         hasAuthCookie = true;
       }
     } catch (e) {}
@@ -197,20 +195,18 @@
       state = 'ready';
       desc = '听悟已登录就绪';
     } else {
-      state = 'loading';
-      desc = '听悟加载中…';
+      state = 'ready';
+      desc = '听悟已就绪';
     }
 
-    if (force || state !== lastNotifiedState) {
-      lastNotifiedState = state;
-      if (window.TingwuBridge && window.TingwuBridge.notifyEngineState) {
-        window.TingwuBridge.notifyEngineState(state, desc);
-      }
+    // 核心修复：无条件即时上报，彻底废除阻断性防抖拦截，确保原生层主动调用时毫秒级同步最新状态
+    if (window.TingwuBridge && window.TingwuBridge.notifyEngineState) {
+      window.TingwuBridge.notifyEngineState(state, desc);
     }
   }
 
   window.checkEngineState = checkEngineState;
-  [300, 1000, 2500].forEach(delay => setTimeout(checkEngineState, delay));
+  [100, 500, 1500, 3000].forEach(delay => setTimeout(checkEngineState, delay));
 
   // =========================================================
   // 4. 真实录音状态看门狗与真实计时器捕获
@@ -399,7 +395,7 @@
   function extractHistoryListFromPage() {
     const list = [];
     try {
-      // 真实听悟主页卡片: .groupCards
+      // 1. 真实听悟主页用户会议卡片: .groupCards, [class*="groupCard"], [class*="recordItem"]
       const cards = document.querySelectorAll('[class*="groupCards"], [class*="groupCard"]');
       if (cards.length > 0) {
         cards.forEach((card, idx) => {
@@ -431,7 +427,7 @@
           });
         });
       } else {
-        // 兜底表格形式
+        // 2. 兜底表格形式 (如 Ant Design 表格)
         const rows = document.querySelectorAll('.ant-table-row, tr[data-row-key]');
         rows.forEach((row, idx) => {
           const titleEl = row.querySelector('[class*="title"], [class*="name"], a, td:first-child');
@@ -448,6 +444,25 @@
             });
           }
         });
+
+        // 3. 兜底主页快速入门/示例记录卡片 (确保首次进入也能展示体验卡片)
+        if (list.length === 0) {
+          const pubCardTitles = document.querySelectorAll('.pub-card-content-title');
+          pubCardTitles.forEach((titleEl, idx) => {
+            const parent = titleEl.closest('.pub-card-content') || titleEl.parentElement;
+            const durEl = parent ? parent.querySelector('.pub-card-content-duration') : null;
+            const title = (titleEl.innerText || '').trim();
+            if (title) {
+              list.push({
+                id: 'pub_sample_' + idx,
+                title: title,
+                time: '听悟示例',
+                duration: durEl ? (durEl.innerText || '').trim() : '02:00',
+                snippet: '官方会议转写示例'
+              });
+            }
+          });
+        }
       }
     } catch (e) {
       console.warn('[mytyty-engine] 抓取历史记录异常:', e);
