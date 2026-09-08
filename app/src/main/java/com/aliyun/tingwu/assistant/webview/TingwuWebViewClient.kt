@@ -17,14 +17,14 @@ class TingwuWebViewClient(
     override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
         val url = request?.url?.toString() ?: return false
 
-        // 处理支付宝、微信、钉钉等三方协议唤起
+        // 处理支付宝、微信等三方协议唤起
         if (!url.startsWith("http://") && !url.startsWith("https://")) {
             return try {
                 val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
                 context.startActivity(intent)
                 true
             } catch (e: Exception) {
-                true // 拦截避免崩溃
+                true
             }
         }
 
@@ -37,8 +37,6 @@ class TingwuWebViewClient(
 
         // 在 DOM 最早时机注入平台伪装脚本
         view?.evaluateJavascript(DesktopSpoofHelper.getPreloadSpoofScript(), null)
-
-        // 刷新并持久化 Cookie
         CookieManager.getInstance().flush()
     }
 
@@ -46,34 +44,33 @@ class TingwuWebViewClient(
         super.onPageFinished(view, url)
         onPageLoadStateChanged?.invoke(false, url ?: "")
 
-        // 再次注入确保单页应用 (SPA) 路由切换后生效
+        // 再次注入平台伪装
         view?.evaluateJavascript(DesktopSpoofHelper.getPreloadSpoofScript(), null)
 
-        // 注入核心抓取与操作引擎
-        val injectorJs = DesktopSpoofHelper.loadAssetScript(context, "ui/tingwu-injector.js")
-        if (injectorJs.isNotEmpty()) {
-            view?.evaluateJavascript(injectorJs, null)
-        }
-
-        // 注入桌面端样式优化补丁
-        val fixCss = DesktopSpoofHelper.loadAssetScript(context, "ui/tingwu-desktop-fix.css")
-        if (fixCss.isNotEmpty()) {
-            val encodedCss = fixCss.replace("\n", " ").replace("'", "\\'")
-            val cssInjectionScript = """
+        // 注入移动端深度适配 CSS 样式表 (包含登录框全宽显示与右半侧展示修复)
+        val adaptCss = DesktopSpoofHelper.loadAssetFile(context, "tingwu-mobile-adapt.css")
+        if (adaptCss.isNotEmpty()) {
+            val cleanCss = adaptCss.replace("\n", " ").replace("'", "\\'")
+            val cssScript = """
                 (function() {
-                    var style = document.getElementById('tingwu-desktop-fix');
+                    var style = document.getElementById('mytyty-mobile-adapt-style');
                     if (!style) {
                         style = document.createElement('style');
-                        style.id = 'tingwu-desktop-fix';
-                        style.innerHTML = '$encodedCss';
+                        style.id = 'mytyty-mobile-adapt-style';
                         document.head.appendChild(style);
                     }
+                    style.innerHTML = '$cleanCss';
                 })();
             """.trimIndent()
-            view?.evaluateJavascript(cssInjectionScript, null)
+            view?.evaluateJavascript(cssScript, null)
         }
 
-        // 提交持久化 Cookie
+        // 注入移动端交互辅助脚本 (登录弹窗自适应、新手引导消杀)
+        val adaptJs = DesktopSpoofHelper.loadAssetFile(context, "tingwu-mobile-adapt.js")
+        if (adaptJs.isNotEmpty()) {
+            view?.evaluateJavascript(adaptJs, null)
+        }
+
         CookieManager.getInstance().flush()
     }
 }

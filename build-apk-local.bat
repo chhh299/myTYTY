@@ -1,17 +1,16 @@
 @echo off
 chcp 65001 >nul
-title 听悟助手 - 本地 APK 编译脚本
+title mytyty - 本地 APK 编译脚本
 echo ========================================================
-echo   正在准备编译 Android Debug APK...
+echo   正在准备编译 mytyty Android Debug APK...
 echo ========================================================
 
 where java >nul 2>nul
 if %errorlevel% neq 0 (
-    echo [提示] 本机未安装 JDK 17。
+    echo [提示] 本机未检测到 JDK 17。
     echo 推荐方案：
-    echo 1. 双击运行 run-preview.bat 立即在电脑/手机浏览器中体验 1:1 高保真交互；
-    echo 2. 将本工程推送到 GitHub，GitHub Actions 会自动编译并生成 APK 安装包供直接下载；
-    echo 3. 或者安装 Android Studio 并直接打开当前目录进行编译。
+    echo 1. 将本工程推送到 GitHub，GitHub Actions 会自动编译并生成 APK 安装包供直接下载；
+    echo 2. 或者安装 Android Studio 并直接打开当前目录进行编译。
     echo.
     pause
     exit /b 1

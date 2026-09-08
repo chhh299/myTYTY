@@ -14,57 +14,54 @@ object DesktopSpoofHelper {
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
 
     /**
-     * 配置 WebView 为 100% 桌面模式运行环境
+     * 配置 WebView 为 100% 桌面模式运行环境，并支持视口自适应缩放
      */
     @SuppressLint("SetJavaScriptEnabled")
     fun setupDesktopSettings(webView: WebView) {
         val settings = webView.settings
 
-        // 1. 请求头伪装
+        // 1. 请求头伪装为 PC Chrome
         settings.userAgentString = DESKTOP_USER_AGENT
 
-        // 2. 宽视口与桌面等比缩放
+        // 2. 宽视口与桌面等比缩放 (关键：让原本超宽的电脑页面等比缩进手机屏幕，防止右侧短信登录被切断)
         settings.useWideViewPort = true
         settings.loadWithOverviewMode = true
 
-        // 3. 核心功能开启
+        // 3. 开启缩放控制 (支持双指缩放微调)
+        settings.setSupportZoom(true)
+        settings.builtInZoomControls = true
+        settings.displayZoomControls = false
+
+        // 4. 核心功能开启
         settings.javaScriptEnabled = true
         settings.domStorageEnabled = true
         settings.databaseEnabled = true
         settings.allowFileAccess = true
         settings.allowContentAccess = true
 
-        // 4. 音频与多媒体策略
+        // 5. 音频与录音策略 (关键：允许网页无需手势直接启动音频捕获流)
         settings.mediaPlaybackRequiresUserGesture = false
 
-        // 5. 混合内容允许
+        // 6. 混合内容允许
         settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
 
-        // 6. 缓存策略
+        // 7. 缓存策略
         settings.cacheMode = WebSettings.LOAD_DEFAULT
     }
 
     /**
      * 生成在 DOM 初始化前注入的 JS 伪装脚本
-     * 篡改 navigator.platform 与 navigator.userAgentData，规避现代大前端的高级设备探测
+     * 篡改 navigator.platform 与 navigator.userAgentData
      */
     fun getPreloadSpoofScript(): String {
         return """
             (function() {
                 try {
-                    // 伪装平台特征
                     Object.defineProperty(navigator, 'platform', {
                         get: function() { return 'Win32'; },
                         configurable: false
                     });
 
-                    // 伪装触控特征（保留必要事件同时防止被当成手机网页）
-                    Object.defineProperty(navigator, 'maxTouchPoints', {
-                        get: function() { return 0; },
-                        configurable: false
-                    });
-
-                    // 伪装 Client Hints API (声明非移动端)
                     if (navigator.userAgentData) {
                         var mockUaData = {
                             brands: [
@@ -81,23 +78,22 @@ object DesktopSpoofHelper {
                         });
                     }
 
-                    // 注入标准 Chrome 运行时对象
                     if (!window.chrome) {
                         window.chrome = { app: {}, runtime: {}, loadTimes: function() {}, csi: function() {} };
                     }
                 } catch (e) {
-                    console.error('[SpoofHelper] 预加载伪装异常:', e);
+                    console.error('[mytyty] 预加载伪装异常:', e);
                 }
             })();
         """.trimIndent()
     }
 
     /**
-     * 从 assets 读取注入脚本
+     * 从 assets 读取文本文件
      */
-    fun loadAssetScript(context: Context, assetPath: String): String {
+    fun loadAssetFile(context: Context, fileName: String): String {
         return try {
-            val inputStream = context.assets.open(assetPath)
+            val inputStream = context.assets.open(fileName)
             val reader = BufferedReader(InputStreamReader(inputStream))
             reader.use { it.readText() }
         } catch (e: Exception) {

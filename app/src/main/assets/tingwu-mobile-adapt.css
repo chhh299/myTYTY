@@ -1,0 +1,120 @@
+/* =========================================================
+   通义听悟移动端真实网页深度适配样式表 (tingwu-mobile-adapt.css)
+   直接注入到真实的 https://tingwu.aliyun.com 页面上下文中
+   ========================================================= */
+
+/* 1. 核心登录弹窗自适应与右半部短信登录展示修复 (解决扫码截断、右侧短信不可见问题) */
+.aliyun-login-component-wrapper,
+.login-intercepts-modal-body,
+.ant-modal,
+.ant-modal-content,
+.ant-modal-body,
+[class*="login-container"],
+[class*="login-box"],
+[class*="login-wrapper"],
+[class*="login-dialog"],
+[class*="login-modal"] {
+  max-width: 100vw !important;
+  box-sizing: border-box !important;
+  overflow-x: auto !important;
+  -webkit-overflow-scrolling: touch !important;
+}
+
+/* 允许阿里双栏登录布局自适应，优先展示右侧短信登录表单 */
+.login-blocks,
+.login-content,
+.login-box-inner,
+[class*="login-blocks"],
+[class*="login-content"] {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  justify-content: center !important;
+  max-width: 100% !important;
+}
+
+/* 登录 iframe 自适应容器 */
+iframe[src*="login"],
+iframe[src*="passport"],
+.login-iframe,
+#alibaba-login-box {
+  max-width: 100% !important;
+  width: 100% !important;
+  min-width: 320px !important;
+  display: block !important;
+  margin: 0 auto !important;
+  border: none !important;
+  overflow-x: auto !important;
+}
+
+/* 提示条样式 */
+#mytyty-login-tip {
+  background: #E8FFEA;
+  color: #008726;
+  font-size: 13px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  margin-bottom: 10px;
+  text-align: center;
+  font-weight: bold;
+}
+
+/* 2. 隐藏 PC 端下载客户端弹窗、引导横幅及移动拦截蒙层 */
+.download-client-banner,
+.desktop-app-banner,
+.top-nav-app-download,
+[class*="download-banner"],
+[class*="app-download-guide"],
+[class*="client-guide"],
+[class*="guide-mask"],
+.client-download-guide,
+.ant-modal-mask + div > [class*="guide-mask"] {
+  display: none !important;
+}
+
+/* 3. 基础布局适配手机视口 */
+html, body {
+  width: 100% !important;
+  min-width: unset !important;
+  overflow-x: hidden !important;
+  -webkit-tap-highlight-color: transparent !important;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif !important;
+}
+
+.ant-layout {
+  min-width: unset !important;
+  width: 100% !important;
+  background: #F7F8FA !important;
+}
+
+.ant-layout-content {
+  padding: 8px !important;
+  min-width: unset !important;
+  width: 100% !important;
+  box-sizing: border-box !important;
+}
+
+/* 4. 实时录音与转写字幕区域触摸优化 */
+[class*="transcript"],
+[class*="subtitle"],
+[class*="sentence-item"],
+.realtime-content {
+  font-size: 16px !important;
+  line-height: 1.8 !important;
+  word-break: break-word !important;
+}
+
+/* 5. 增大核心操作按钮触摸热区 */
+button.ant-btn,
+.ant-btn-primary,
+[role="button"] {
+  min-height: 40px !important;
+  touch-action: manipulation !important;
+}
+
+/* 6. 历史记录表格支持横向滑动 */
+.ant-table-wrapper,
+[class*="record-list"],
+[class*="doc-list"] {
+  overflow-x: auto !important;
+  -webkit-overflow-scrolling: touch !important;
+}

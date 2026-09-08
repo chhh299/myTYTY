@@ -1,44 +1,226 @@
 <?xml version="1.0" encoding="utf-8"?>
-<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/app_bg">
+    android:orientation="vertical"
+    android:background="@color/white">
 
-    <!-- 1. 后台听悟桌面版引擎 WebView (负责加载 tingwu.aliyun.com 网页) -->
-    <WebView
-        android:id="@+id/engineWebView"
+    <!-- 1. 原生极简顶栏 (无任何虚假状态栏或假时间图标) -->
+    <LinearLayout
+        android:id="@+id/nativeTopBar"
         android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:visibility="gone" />
+        android:layout_height="52dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingStart="16dp"
+        android:paddingEnd="12dp"
+        android:background="@color/white"
+        android:elevation="2dp">
 
-    <!-- 2. 前台移动端定制交互层 WebView (本地 assets 离线极速渲染) -->
-    <WebView
-        android:id="@+id/uiWebView"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:visibility="visible" />
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
 
-    <!-- 3. 当处于“电脑网页全屏模式”时的浮动返回按钮 -->
-    <com.google.android.material.floatingactionbutton.ExtendedFloatingActionButton
-        android:id="@+id/btnReturnToMobileUi"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="top|start"
-        android:layout_margin="16dp"
-        android:text="返回卡片界面"
-        android:textColor="@color/white"
-        android:backgroundTint="@color/primary_dark"
-        android:visibility="gone" />
+            <TextView
+                android:id="@+id/tvAppTitle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="mytyty"
+                android:textColor="@color/primary_dark"
+                android:textSize="18sp"
+                android:textStyle="bold" />
 
-    <!-- 4. 初始化加载指示器 -->
+            <TextView
+                android:id="@+id/tvUrlSubtitle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="tingwu.aliyun.com"
+                android:textColor="#86909C"
+                android:textSize="11sp" />
+        </LinearLayout>
+
+        <!-- 刷新按钮 -->
+        <ImageButton
+            android:id="@+id/btnRefreshPage"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:src="@android:drawable/ic_menu_rotate"
+            android:tint="@color/primary_dark"
+            android:contentDescription="刷新" />
+
+        <!-- 视口缩放切换按钮 (解决网页太宽/自适应切换) -->
+        <ImageButton
+            android:id="@+id/btnToggleZoom"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:src="@android:drawable/ic_menu_view"
+            android:tint="@color/primary_dark"
+            android:contentDescription="切换缩放模式" />
+
+        <!-- 更多设置按钮 -->
+        <ImageButton
+            android:id="@+id/btnOpenSettings"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:src="@android:drawable/ic_menu_preferences"
+            android:tint="@color/primary_dark"
+            android:contentDescription="设置" />
+    </LinearLayout>
+
+    <!-- 网页加载进度条 -->
     <ProgressBar
-        android:id="@+id/loadingIndicator"
+        android:id="@+id/pageProgressBar"
         style="?android:attr/progressBarStyleHorizontal"
         android:layout_width="match_parent"
-        android:layout_height="4dp"
-        android:layout_gravity="top"
-        android:indeterminate="true"
+        android:layout_height="3dp"
+        android:indeterminate="false"
+        android:max="100"
+        android:progressTint="@color/accent_green"
         android:visibility="gone" />
 
-</FrameLayout>
+    <!-- 2. 核心 WebView 容器 (直接加载真实的通义听悟，绝无任何假静态网页) -->
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1">
+
+        <WebView
+            android:id="@+id/mainWebView"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+    </FrameLayout>
+
+    <!-- 3. 原生底部四大导航 Tab 栏 -->
+    <LinearLayout
+        android:id="@+id/nativeBottomBar"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:orientation="horizontal"
+        android:background="@color/white"
+        android:elevation="8dp">
+
+        <!-- Tab 1: 主页 -->
+        <LinearLayout
+            android:id="@+id/tabHome"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:clickable="true"
+            android:focusable="true"
+            android:background="?attr/selectableItemBackground">
+
+            <TextView
+                android:id="@+id/tvTabHome"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="主页"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:textColor="@color/primary_dark" />
+
+            <View
+                android:id="@+id/dotHome"
+                android:layout_width="5dp"
+                android:layout_height="5dp"
+                android:layout_marginTop="3dp"
+                android:background="@drawable/shape_nav_dot" />
+        </LinearLayout>
+
+        <!-- Tab 2: 实时录音 -->
+        <LinearLayout
+            android:id="@+id/tabLive"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:clickable="true"
+            android:focusable="true"
+            android:background="?attr/selectableItemBackground">
+
+            <TextView
+                android:id="@+id/tvTabLive"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="实时"
+                android:textSize="14sp"
+                android:textColor="#86909C" />
+
+            <View
+                android:id="@+id/dotLive"
+                android:layout_width="5dp"
+                android:layout_height="5dp"
+                android:layout_marginTop="3dp"
+                android:background="@drawable/shape_nav_dot"
+                android:visibility="invisible" />
+        </LinearLayout>
+
+        <!-- Tab 3: 历史记录 -->
+        <LinearLayout
+            android:id="@+id/tabHistory"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:clickable="true"
+            android:focusable="true"
+            android:background="?attr/selectableItemBackground">
+
+            <TextView
+                android:id="@+id/tvTabHistory"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="历史"
+                android:textSize="14sp"
+                android:textColor="#86909C" />
+
+            <View
+                android:id="@+id/dotHistory"
+                android:layout_width="5dp"
+                android:layout_height="5dp"
+                android:layout_marginTop="3dp"
+                android:background="@drawable/shape_nav_dot"
+                android:visibility="invisible" />
+        </LinearLayout>
+
+        <!-- Tab 4: 设置 -->
+        <LinearLayout
+            android:id="@+id/tabSettings"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:clickable="true"
+            android:focusable="true"
+            android:background="?attr/selectableItemBackground">
+
+            <TextView
+                android:id="@+id/tvTabSettings"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="设置"
+                android:textSize="14sp"
+                android:textColor="#86909C" />
+
+            <View
+                android:id="@+id/dotSettings"
+                android:layout_width="5dp"
+                android:layout_height="5dp"
+                android:layout_marginTop="3dp"
+                android:background="@drawable/shape_nav_dot"
+                android:visibility="invisible" />
+        </LinearLayout>
+    </LinearLayout>
+
+</LinearLayout>
