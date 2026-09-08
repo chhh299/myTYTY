@@ -48,12 +48,11 @@ class TingwuWebViewClient(
 
     override fun onPageFinished(view: WebView?, url: String?) {
         super.onPageFinished(view, url)
-        onPageLoadStateChanged?.invoke(false, url ?: "")
 
-        // 注入 Windows 11 平台特征
+        // 1. 注入 Windows 11 平台特征
         view?.evaluateJavascript(DesktopSpoofHelper.getPreloadSpoofScript(), null)
 
-        // 注入登录弹窗全宽展示与防截断 CSS
+        // 2. 注入登录弹窗全宽展示与防截断 CSS
         val adaptCss = DesktopSpoofHelper.loadAssetFile(context, "tingwu-mobile-adapt.css")
         if (adaptCss.isNotEmpty()) {
             val cleanCss = adaptCss.replace("\n", " ").replace("'", "\\'")
@@ -71,19 +70,22 @@ class TingwuWebViewClient(
             view?.evaluateJavascript(cssScript, null)
         }
 
-        // 注入后台数据穿透与录音调度引擎
+        // 3. 注入后台数据穿透与录音调度引擎 (必须先注入完成，确保 window.checkEngineState 存在)
         val injectorJs = DesktopSpoofHelper.loadAssetFile(context, "tingwu-engine-injector.js")
         if (injectorJs.isNotEmpty()) {
             view?.evaluateJavascript(injectorJs, null)
         }
 
-        // 注入登录辅助脚本
+        // 4. 注入登录辅助脚本
         val adaptJs = DesktopSpoofHelper.loadAssetFile(context, "tingwu-mobile-adapt.js")
         if (adaptJs.isNotEmpty()) {
             view?.evaluateJavascript(adaptJs, null)
         }
 
         CookieManager.getInstance().flush()
+
+        // 5. 关键时序修复：所有脚本注入完毕后，再触发页面加载完成回调，防止调用空函数
+        onPageLoadStateChanged?.invoke(false, url ?: "")
     }
 
     /**

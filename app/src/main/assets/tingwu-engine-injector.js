@@ -154,13 +154,13 @@
   }
 
   // =========================================================
-  // 3. 状态感知与无流看门狗 (精准三位一体检测：登录按钮、用户头像、弹窗URL)
+  // 3. 状态感知与无流看门狗 (精准三位一体检测：登录按钮、工作台特征、用户身份)
   // =========================================================
   function checkEngineState() {
     const url = window.location.href;
     const isLoginUrl = url.includes('login') || url.includes('passport') || url.includes('signin');
     const hasLoginModal = document.querySelector(
-      '.aliyun-login-component-wrapper, .login-intercepts-modal-body, #alibaba-login-box, [class*="login-modal"], iframe[src*="login"]'
+      '.aliyun-login-component-wrapper, .login-intercepts-modal-body, #alibaba-login-box, [class*="login-modal"], iframe[src*="login"], iframe[src*="passport"]'
     );
 
     // 1. 检测页面上的登录/注册按钮或链接
@@ -181,30 +181,56 @@
       }
     }
 
-    // 2. 检测页面上的已登录标识 (用户头像、用户名、账号中心菜单)
+    // 2. 检测页面上的已登录/工作台特征 (解决 AntD 动态类名无法命中导致死锁在 loading 的严重缺陷)
     const hasUserAvatar = document.querySelector(
-      '[class*="avatar"], [class*="user-avatar"], [class*="user-profile"], [class*="header-user"], [class*="userInfo"], img[class*="avatar"], .user-avatar-wrapper'
+      '[class*="avatar"], [class*="user-avatar"], [class*="user-profile"], [class*="header-user"], [class*="userInfo"], img[class*="avatar"], .user-avatar-wrapper, [class*="user-name"], .ant-avatar'
     );
 
+    // 3. 检测通义听悟 PC 工作台的核心功能模块 (已登录的决定性特征)
+    let hasWorkbenchFeature = false;
+    const bodyText = (document.body ? document.body.innerText || '' : '');
+    if (
+      bodyText.includes('实时记录') ||
+      bodyText.includes('开启实时记录') ||
+      bodyText.includes('新建记录') ||
+      bodyText.includes('音视频转写') ||
+      bodyText.includes('全部文档') ||
+      bodyText.includes('历史记录') ||
+      document.querySelector('[class*="record"], [class*="workbench"], .ant-card, .ant-layout-content')
+    ) {
+      hasWorkbenchFeature = true;
+    }
+
+    // 4. 检查 Cookie 登录特征 (阿里云统一身份 Token)
+    let hasAuthCookie = false;
+    try {
+      const cookie = document.cookie || '';
+      if (cookie.includes('login_aliyunid') || cookie.includes('munb') || cookie.includes('cna') || cookie.includes('aliyun_choice')) {
+        hasAuthCookie = true;
+      }
+    } catch (e) {}
+
     let state = 'ready';
-    let desc = '听悟引擎就绪';
+    let desc = '听悟已登录就绪';
 
     if (isLoginUrl || hasLoginModal) {
       state = 'need_login';
       desc = '请在主页登录阿里云账号';
-    } else if (hasLoginBtn && !hasUserAvatar) {
-      // 明确有登录按钮且没有头像，属于未登录状态
+    } else if (hasLoginBtn && !hasUserAvatar && !hasAuthCookie) {
+      // 明确有登录按钮，且没有头像或身份 Cookie，属于未登录状态
       state = 'need_login';
       desc = '未登录，请在主页完成登录';
-    } else if (hasUserAvatar) {
-      // 明确有用户头像，属于已登录就绪状态
+    } else if (hasUserAvatar || hasWorkbenchFeature || hasAuthCookie || (!hasLoginBtn && bodyText.length > 50)) {
+      // 只要具备用户身份、或工作台特征、或无登录按钮且页面已渲染，100% 为已登录就绪！
       state = 'ready';
       desc = '听悟已登录就绪';
     } else {
-      // 正在加载中
+      // 仅在完全空白无内容时才为 loading
       state = 'loading';
       desc = '听悟加载中…';
     }
+
+    console.log('[mytyty-engine] 状态检测结果 ->', state, desc, { hasLoginBtn, hasUserAvatar, hasWorkbenchFeature, hasAuthCookie });
 
     if (window.TingwuBridge && window.TingwuBridge.notifyEngineState) {
       window.TingwuBridge.notifyEngineState(state, desc);
@@ -213,6 +239,11 @@
 
   // 暴露给原生层主动调用
   window.checkEngineState = checkEngineState;
+
+  // React SPA 异步渲染看门狗：页面初次加载后分别在 500ms、1500ms、3000ms 持续自旋刷新状态
+  [500, 1500, 3000].forEach(delay => {
+    setTimeout(checkEngineState, delay);
+  });
 
   // 20秒静默看门狗
   setInterval(() => {

@@ -273,6 +273,11 @@ class MainActivity : AppCompatActivity() {
                 "window.onNativeSwitchView && window.onNativeSwitchView('live');",
                 null
             )
+            // 切回实时卡片时，主动刷新一次听悟登录态，确保登录后立刻变为就绪
+            binding.engineWebView.evaluateJavascript(
+                "window.checkEngineState && window.checkEngineState();",
+                null
+            )
             binding.tvUrlSubtitle.text = "极简卡片 · 实时录音与翻译"
         }
 
@@ -290,7 +295,11 @@ class MainActivity : AppCompatActivity() {
                 "window.onNativeSwitchView && window.onNativeSwitchView('history');",
                 null
             )
-            // 通知后台引擎抓取最新历史记录并回传
+            // 切到历史时同步刷新引擎状态与历史数据
+            binding.engineWebView.evaluateJavascript(
+                "window.checkEngineState && window.checkEngineState();",
+                null
+            )
             fetchHistoryListFromEngine()
             binding.tvUrlSubtitle.text = "历史 · 云端会议纪要卡片"
         }

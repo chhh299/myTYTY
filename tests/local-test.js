@@ -564,6 +564,41 @@ console.log('\n【测试 6】前台卡片 app.js 端到端事件与 UTF-8 Base64
   assert('原文已被无损还原', origEl && origEl.innerText === '阿里云通义听悟实时转写测试');
 }
 
+// --------------------------------------------------------
+// 测试 8: 真实复杂已登录主页（异步渲染、无专属头像类名但有工作台卡片与无登录按钮）
+// --------------------------------------------------------
+console.log('\n【测试 8】复杂真实已登录主页判定 (复现“一直在显示连接中”的严重缺陷)');
+{
+  const { sandbox, document, bridgeHistory } = createSandbox('https://tingwu.aliyun.com/home');
+
+  // 模拟真实场景：用户已在主页登录成功，页面有通义听悟工作台核心卡片与用户昵称，但没有命中简单的 .avatar 选择器，且无登录按钮
+  const navHeader = new MockElement('header', '', 'ant-layout-header');
+  const userNickname = new MockElement('span', '', 'user-name-text', 'aliyun_user_998');
+  navHeader.appendChild(userNickname);
+
+  const mainContent = new MockElement('main', '', 'ant-layout-content');
+  const recordCard = new MockElement('div', '', 'ant-card', '实时记录\n开启实时转写与翻译');
+  const docList = new MockElement('div', '', 'ant-table', '全部文档列表\n我的会议纪要');
+  mainContent.appendChild(recordCard);
+  mainContent.appendChild(docList);
+
+  document.body.appendChild(navHeader);
+  document.body.appendChild(mainContent);
+
+  // 执行当前的 injector 代码
+  const fn = new Function('window', 'document', 'location', 'sessionStorage', 'TingwuBridge', 'MutationObserver', 'console', getLatestInjectorCode());
+  fn(sandbox.window, sandbox.document, sandbox.location, sandbox.sessionStorage, sandbox.TingwuBridge, sandbox.MutationObserver, sandbox.console);
+
+  const lastState = bridgeHistory.engineStates[bridgeHistory.engineStates.length - 1];
+  console.log('  -> 当前代码在已登录工作台主页判定的状态:', lastState);
+
+  assert(
+    '复杂已登录主页不应该死锁在 loading，应该精准判定为 ready',
+    lastState && lastState.state === 'ready',
+    `实际输出了: ${lastState ? lastState.state : 'undefined'}`
+  );
+}
+
     console.log('\n====================================================');
     console.log(`测试完成! 总计: ${totalTests}, 通过: ${passedTests}, 失败: ${failedTests}`);
     console.log('====================================================\n');
