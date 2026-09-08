@@ -31,12 +31,16 @@
   const chkKeepScreenOn = document.getElementById('chkKeepScreenOn');
 
   // 1. 录音按钮点击交互 (通知 Android 原生层调度听悟引擎)
+  let isPendingStart = false;
+
   function toggleRecording() {
     if (!window.TingwuBridge) {
       console.warn('[mytyty] TingwuBridge 未挂载');
       return;
     }
     if (!isRecording) {
+      if (isPendingStart) return; // 防抖，防止短时间连续点击
+      isPendingStart = true;
       window.TingwuBridge.startRecording();
     } else {
       window.TingwuBridge.stopRecording();
@@ -102,11 +106,13 @@
   // 启动中缓冲态 (解决 P1-1 虚假走表问题)
   window.onNativeRecordingPending = function(isPending) {
     if (isPending) {
+      isPendingStart = true;
       recordBtnLabel.textContent = '正在连接引擎…';
       micStatusText.textContent = '听悟工作台正在就绪…';
       btnToggleRecord.disabled = false; // 严禁完全禁用按钮，保证用户随时可重试
       btnToggleRecord.style.opacity = '0.75';
     } else {
+      isPendingStart = false;
       btnToggleRecord.disabled = false;
       btnToggleRecord.style.opacity = '1.0';
       recordBtnLabel.textContent = '开始实时记录';
@@ -117,6 +123,7 @@
   // 真实录音状态改变 (收到 ACK 后才翻转)
   window.onNativeRecordingStatus = function(active) {
     isRecording = active;
+    isPendingStart = false;
     btnToggleRecord.disabled = false;
     const contentScroll = document.querySelector('.content-scroll');
     if (active) {

@@ -144,7 +144,9 @@
   // =========================================================
   // 3. 真实状态检测 (登录态与工作台判定)
   // =========================================================
-  function checkEngineState() {
+  let lastNotifiedState = '';
+
+  function checkEngineState(force) {
     const url = window.location.href;
     const isLoginUrl = url.includes('login') || url.includes('passport') || url.includes('signin');
     const hasLoginModal = document.querySelector(
@@ -199,8 +201,11 @@
       desc = '听悟加载中…';
     }
 
-    if (window.TingwuBridge && window.TingwuBridge.notifyEngineState) {
-      window.TingwuBridge.notifyEngineState(state, desc);
+    if (force || state !== lastNotifiedState) {
+      lastNotifiedState = state;
+      if (window.TingwuBridge && window.TingwuBridge.notifyEngineState) {
+        window.TingwuBridge.notifyEngineState(state, desc);
+      }
     }
   }
 
@@ -214,10 +219,9 @@
 
   function checkRecordingTimerInDom() {
     const text = document.body ? document.body.innerText : '';
-    const isActuallyRecording = (
-      (text.includes('录音中…') || text.includes('/06:00:00')) &&
-      document.querySelector('.stop-btn, [class*="stop-btn"]') !== null
-    );
+    const hasStopBtn = document.querySelector('.stop-btn, [class*="stop-btn"], [class*="stopBtn"]') !== null;
+    const hasRecordingText = text.includes('录音中…') || text.includes('/06:00:00') || text.includes('已暂停');
+    const isActuallyRecording = hasStopBtn && hasRecordingText;
 
     if (isActuallyRecording && !window.__isRecordingActive) {
       console.log('[mytyty-engine] 检测到真实页面已进入录音状态！');
@@ -279,12 +283,23 @@
       console.log('[mytyty-engine] 收到启动录音指令，当前 URL:', window.location.href);
       lastStreamActiveTime = Date.now();
 
+      // 防重保护：如果当前已经处于录音状态中，绝不重复触发跳转或刷新
+      if (window.__isRecordingActive || document.querySelector('.stop-btn, [class*="stop-btn"]')) {
+        console.log('[mytyty-engine] 当前已在真实录音状态中，忽略重复启动请求');
+        sendAck(true);
+        return true;
+      }
+
       // 场景 A: 当前已经在 /doc/record 录音工作台
       if (window.location.href.includes('/doc/record')) {
         const startBtn = Array.from(document.querySelectorAll('*')).find(e => (e.innerText || '').trim() === '开始录音');
         if (startBtn) {
           console.log('[mytyty-engine] 在录音工作台直接点击【开始录音】');
           dispatchClick(startBtn);
+          return true;
+        } else {
+          // 如果已经在 /doc/record 且没有开始录音按钮，说明正在加载或已启动，切勿强制刷新页面
+          console.log('[mytyty-engine] 处于 /doc/record 页面等待就绪，不执行破坏性重载');
           return true;
         }
       }

@@ -45,6 +45,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var bridge: TingwuBridge
 
     private var isRecording = false
+    private var isRecordingStarting = false
     private var recordSeconds = 0
     private var backPressedTime = 0L
     private var currentTabIndex = 1 // 默认停留在 Tab 1: 实时极简卡片界面
@@ -223,7 +224,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupTopBar() {
         binding.btnRefreshPage.setOnClickListener {
-            if (isRecording) {
+            if (isRecording || isRecordingStarting) {
                 AlertDialog.Builder(this)
                     .setTitle("提示")
                     .setMessage("当前正在录音中，刷新将重置连接并终止录音，是否确认？")
@@ -250,7 +251,7 @@ class MainActivity : AppCompatActivity() {
     private fun setupBottomNav() {
         // Tab 0: 主页 (展示官方主页，用于登录账号、解决短信验证码、管理个人空间)
         binding.tabHome.setOnClickListener {
-            if (isRecording) {
+            if (isRecording || isRecordingStarting) {
                 Toast.makeText(this, "正在实时录音中，请先结束录音再切换页面", Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
@@ -283,7 +284,7 @@ class MainActivity : AppCompatActivity() {
 
         // Tab 2: 历史 (纯正移动端历史会议卡片列表，坚决杜绝直接裸露原版 PC 网页)
         binding.tabHistory.setOnClickListener {
-            if (isRecording) {
+            if (isRecording || isRecordingStarting) {
                 Toast.makeText(this, "正在实时录音中，请先结束录音再切换页面", Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
@@ -336,10 +337,12 @@ class MainActivity : AppCompatActivity() {
     // =========================================================
 
     fun handleStartRecording() {
-        if (isRecording) return
+        if (isRecording || isRecordingStarting) return
+        isRecordingStarting = true
 
         // 若当前听悟引擎明确处于未登录状态，直接阻断并引导用户去主页登录
         if (currentEngineState == "need_login") {
+            isRecordingStarting = false
             Toast.makeText(this, "未检测到阿里云账号登录，请先在“主页”完成登录", Toast.LENGTH_LONG).show()
             // 自动帮用户切换到主页，便于输入短信或扫码
             binding.tabHome.performClick()
@@ -349,6 +352,7 @@ class MainActivity : AppCompatActivity() {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
             != PackageManager.PERMISSION_GRANTED
         ) {
+            isRecordingStarting = false
             requestAppPermissions()
             Toast.makeText(this, "请先授予麦克风权限", Toast.LENGTH_SHORT).show()
             return
@@ -379,6 +383,7 @@ class MainActivity : AppCompatActivity() {
      */
     fun handleRecordingAck(started: Boolean) {
         timerHandler.removeCallbacks(ackWatchdogRunnable)
+        isRecordingStarting = false
 
         if (started) {
             isRecording = true
@@ -405,6 +410,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     fun handleStopRecording() {
+        isRecordingStarting = false
         if (!isRecording) return
 
         isRecording = false
