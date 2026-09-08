@@ -1,6 +1,7 @@
 /**
  * mytyty 极简移动端原生卡片交互控制器 (app.js)
  * 100% 真实事件驱动，严禁任何写死虚假数据与自跑模拟流
+ * 彻底修复 P0-2 双胞胎气泡与 P1-1 虚假录音缺陷
  */
 
 (() => {
@@ -98,9 +99,24 @@
   // 原生 Android 层回调注入入口 (完全由真实事件驱动)
   // =========================================================
 
-  // 录音状态改变
+  // 启动中缓冲态 (解决 P1-1 虚假走表问题)
+  window.onNativeRecordingPending = function(isPending) {
+    if (isPending) {
+      recordBtnLabel.textContent = '正在连接引擎…';
+      micStatusText.textContent = '听悟工作台正在就绪…';
+      btnToggleRecord.disabled = true;
+    } else {
+      btnToggleRecord.disabled = false;
+      recordBtnLabel.textContent = '开始实时记录';
+      micStatusText.textContent = '电脑模式 · 麦克风待命';
+    }
+  };
+
+  // 真实录音状态改变 (收到 ACK 后才翻转)
   window.onNativeRecordingStatus = function(active) {
     isRecording = active;
+    btnToggleRecord.disabled = false;
+    const contentScroll = document.querySelector('.content-scroll');
     if (active) {
       btnToggleRecord.classList.add('is-recording');
       recordBtnLabel.textContent = '结束实时记录';
@@ -108,6 +124,7 @@
       micStatusText.textContent = '实时麦克风录音中 · 云端转写中';
       liveIndicator.style.display = 'flex';
       floatingRecordBar.style.display = 'block';
+      if (contentScroll) contentScroll.classList.add('with-floating-bar');
       if (engineStatusBadge) {
         engineStatusBadge.textContent = '● 实时转写中';
         engineStatusBadge.className = 'header-badge';
@@ -119,6 +136,7 @@
       micStatusText.textContent = '电脑模式 · 麦克风待命';
       liveIndicator.style.display = 'none';
       floatingRecordBar.style.display = 'none';
+      if (contentScroll) contentScroll.classList.remove('with-floating-bar');
       if (engineStatusBadge) {
         engineStatusBadge.textContent = '● 听悟已就绪';
         engineStatusBadge.className = 'header-badge';
@@ -148,18 +166,30 @@
     }
   };
 
-  // 核心：接收并渲染来自通义听悟的真实转写与翻译数据包
+  // 核心：UTF-8 安全 Base64 解码，解决 URIError 问题
+  window.__receiveTranscriptionBase64 = function(base64Str) {
+    try {
+      const binaryString = window.atob(base64Str);
+      const bytes = new Uint8Array(binaryString.length);
+      for (let i = 0; i < binaryString.length; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+      const decoded = new TextDecoder('utf-8').decode(bytes);
+      window.onNativeTranscriptionReceived(decoded);
+    } catch (e) {
+      console.error('[mytyty] TextDecoder Base64 解码异常:', e);
+    }
+  };
+
   window.onNativeTranscriptionReceived = function(jsonStr) {
     try {
       const data = typeof jsonStr === 'string' ? JSON.parse(jsonStr) : jsonStr;
       if (!data) return;
 
-      // 隐藏空状态提示
       if (transcriptEmptyState) {
         transcriptEmptyState.style.display = 'none';
       }
 
-      // 数据协议规范化 (无论是 WebSocket 拦截还是 DOM 穿透)
       const sentenceId = data.id || 'curr_sentence';
       const originalText = data.text || data.original || '';
       const translationText = data.translation || data.trans || '';
@@ -187,13 +217,14 @@
         };
         sentenceMap.set(sentenceId, sentenceObj);
       } else {
+        // 单唯一的句子更新，彻底杜绝双胞胎气泡
         if (originalText) sentenceObj.origEl.textContent = originalText;
         if (translationText) sentenceObj.transEl.textContent = translationText;
       }
 
       updateDisplayMode();
 
-      // 自动平滑滚动到底部跟随最新流
+      // 平滑滚动到底部
       transcriptContainer.scrollTop = transcriptContainer.scrollHeight;
     } catch (e) {
       console.error('[mytyty] 解析转写数据异常:', e, jsonStr);

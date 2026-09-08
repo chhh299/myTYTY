@@ -4,7 +4,9 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
+import android.util.Log
 import android.webkit.CookieManager
+import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -13,6 +15,10 @@ class TingwuWebViewClient(
     private val context: Context,
     private val onPageLoadStateChanged: ((isLoading: Boolean, url: String) -> Unit)? = null
 ) : WebViewClient() {
+
+    companion object {
+        private const val TAG = "TingwuWebViewClient"
+    }
 
     override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
         val url = request?.url?.toString() ?: return false
@@ -78,5 +84,16 @@ class TingwuWebViewClient(
         }
 
         CookieManager.getInstance().flush()
+    }
+
+    /**
+     * 8.9 规范：渲染进程终止崩溃保护，防止后台内存不足导致整个 App 闪退
+     */
+    override fun onRenderProcessGone(view: WebView?, detail: RenderProcessGoneDetail?): Boolean {
+        val didCrash = detail?.didCrash() ?: false
+        Log.e(TAG, "听悟引擎 WebView 渲染进程被杀，didCrash=$didCrash")
+        // 尝试重新加载
+        view?.reload()
+        return true
     }
 }

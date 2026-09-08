@@ -112,6 +112,12 @@ body {
   display: flex;
   flex-direction: column;
   gap: 14px;
+  transition: padding-bottom 0.2s ease;
+}
+
+/* 录音时悬浮条弹出增加底部安全距离 (8.12 规范) */
+.content-scroll.with-floating-bar {
+  padding-bottom: 140px;
 }
 
 /* 通用卡片容器 */

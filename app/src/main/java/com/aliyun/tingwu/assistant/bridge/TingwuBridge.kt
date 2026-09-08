@@ -11,12 +11,22 @@ class TingwuBridge(
     private val mainHandler = Handler(Looper.getMainLooper())
 
     /**
-     * 前台卡片 UI 点击“开始录音”
+     * 前台卡片 UI 点击“开始录音”请求
      */
     @JavascriptInterface
     fun startRecording() {
         mainHandler.post {
             activity.handleStartRecording()
+        }
+    }
+
+    /**
+     * 后台听悟引擎确认网页实际已开始收音 (双向 ACK 握手，杜绝虚假走表)
+     */
+    @JavascriptInterface
+    fun notifyRecordingAck(started: Boolean) {
+        mainHandler.post {
+            activity.handleRecordingAck(started)
         }
     }
 

@@ -1,12 +1,14 @@
 /**
  * 通义听悟移动端真实网页注入适配脚本 (tingwu-mobile-adapt.js)
- * 直接注入到真实的 https://tingwu.aliyun.com 页面上下文中
+ * 解决用户触控抢夺问题 (P2-1)，并适配短信登录
  */
 
 (() => {
   console.log('[mytyty] 听悟移动深度适配脚本注入成功');
 
-  // 1. 核心登录弹窗修复与短信登录自动居中
+  let hasAlignedScroll = false;
+
+  // 1. 核心登录弹窗修复与短信登录单次安全居中 (不暴力抢夺用户焦点)
   function fixLoginModal() {
     const loginModals = document.querySelectorAll(
       '.aliyun-login-component-wrapper, .login-intercepts-modal-body, .ant-modal, [class*="login-container"], [class*="login-dialog"], [class*="login-modal"]'
@@ -33,10 +35,10 @@
         }
       });
 
-      // 如果是双栏扫码+账号布局，将滚动条平滑拉到右侧（短信验证码区域）
-      if (modal.scrollWidth > modal.clientWidth + 50) {
-        // 自动居中至右半部表单
+      // 仅在首次弹出时单次对齐，严禁高频循环强推 scrollLeft 抢夺用户触控
+      if (!hasAlignedScroll && modal.scrollWidth > modal.clientWidth + 50) {
         modal.scrollLeft = modal.scrollWidth - modal.clientWidth;
+        hasAlignedScroll = true;
       }
     });
 
@@ -46,10 +48,6 @@
       try {
         iframe.style.maxWidth = '100vw';
         iframe.style.width = '100%';
-        const parent = iframe.parentElement;
-        if (parent && parent.scrollWidth > parent.clientWidth) {
-          parent.scrollLeft = parent.scrollWidth - parent.clientWidth;
-        }
       } catch (e) {}
     });
   }
@@ -73,24 +71,7 @@
     });
   }
 
-  // 3. 暴露给原生层调用的快捷跳转辅助函数
-  window.__mytytyGotoLiveRecord = function() {
-    // 优先在当前页面寻找“实时记录”卡片/按钮
-    const candidates = document.querySelectorAll('button, a, div[role="button"], [class*="record"], [class*="btn"]');
-    for (let el of candidates) {
-      const text = (el.innerText || '').trim();
-      if (text === '实时记录' || text === '开始记录' || text.includes('开启实时记录')) {
-        try {
-          el.click();
-          console.log('[mytyty] 成功触发页面实时记录按钮');
-          return true;
-        } catch (e) {}
-      }
-    }
-    // 未找到则直接由客户端路由至 /doc/record
-    return false;
-  };
-
+  // 3. 历史记录滚动
   window.__mytytyScrollToHistory = function() {
     const historySection = document.querySelector('[class*="history"], [class*="record-list"], [class*="doc-list"], .ant-table');
     if (historySection) {
@@ -101,10 +82,14 @@
     return false;
   };
 
-  // 4. 监听 DOM 树变化并启动
+  // 4. 防抖式监听 DOM 变化
+  let debounceTimer = null;
   const observer = new MutationObserver(() => {
-    fixLoginModal();
-    dismissAnnoyingModals();
+    if (debounceTimer) clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+      fixLoginModal();
+      dismissAnnoyingModals();
+    }, 200);
   });
 
   function init() {

@@ -2,13 +2,19 @@ package com.aliyun.tingwu.assistant
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.graphics.Typeface
+import android.net.ConnectivityManager
+import android.net.Network
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.util.Base64
 import android.view.View
 import android.view.WindowManager
 import android.webkit.CookieManager
@@ -18,7 +24,6 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import com.aliyun.tingwu.assistant.audio.AudioRecorderManager
 import com.aliyun.tingwu.assistant.bridge.TingwuBridge
 import com.aliyun.tingwu.assistant.databinding.ActivityMainBinding
 import com.aliyun.tingwu.assistant.service.RecordingService
@@ -31,19 +36,17 @@ class MainActivity : AppCompatActivity() {
     companion object {
         private const val REQUEST_PERMISSIONS_CODE = 2001
         private const val TINGWU_HOME_URL = "https://tingwu.aliyun.com/home"
-        private const val TINGWU_RECORD_URL = "https://tingwu.aliyun.com/doc/record"
         private const val PREFS_NAME = "mytyty_settings"
         private const val KEY_KEEP_SCREEN_ON = "keep_screen_on"
     }
 
     private lateinit var binding: ActivityMainBinding
     private lateinit var bridge: TingwuBridge
-    private lateinit var audioRecorderManager: AudioRecorderManager
 
     private var isRecording = false
     private var recordSeconds = 0
     private var backPressedTime = 0L
-    private var currentTabIndex = 1 // 默认停留在 Tab 2: 实时极简卡片界面
+    private var currentTabIndex = 1 // 默认停留在 Tab 1: 实时极简卡片界面
 
     private val timerHandler = Handler(Looper.getMainLooper())
     private val timerRunnable = object : Runnable {
@@ -60,13 +63,24 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // 监听通知栏“结束录音”广播闭环
+    private val stopRecordingReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == RecordingService.BROADCAST_STOP_RECORDING) {
+                handleStopRecording()
+            }
+        }
+    }
+
+    private var connectivityManager: ConnectivityManager? = null
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
         bridge = TingwuBridge(this)
-        audioRecorderManager = AudioRecorderManager(this)
 
         val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val keepScreenOn = prefs.getBoolean(KEY_KEEP_SCREEN_ON, true)
@@ -78,10 +92,49 @@ class MainActivity : AppCompatActivity() {
         setupTopBar()
         setupBottomNav()
         setupBackNavigation()
+        registerStopReceiver()
+        setupNetworkMonitor()
         requestAppPermissions()
 
-        // 默认显示 Tab 2: 实时极简卡片，引擎在后台准备
+        // 默认显示 Tab 1: 实时极简卡片，引擎在后台准备
         switchTab(1)
+    }
+
+    private fun registerStopReceiver() {
+        val filter = IntentFilter(RecordingService.BROADCAST_STOP_RECORDING)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(stopRecordingReceiver, filter, RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(stopRecordingReceiver, filter)
+        }
+    }
+
+    private fun setupNetworkMonitor() {
+        connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+        networkCallback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                runOnUiThread {
+                    if (isRecording) {
+                        binding.uiWebView.evaluateJavascript(
+                            "window.onNativeEngineState && window.onNativeEngineState('ready', '网络已重连');",
+                            null
+                        )
+                    }
+                }
+            }
+
+            override fun onLost(network: Network) {
+                runOnUiThread {
+                    binding.uiWebView.evaluateJavascript(
+                        "window.onNativeEngineState && window.onNativeEngineState('loading', '网络连接已断开');",
+                        null
+                    )
+                }
+            }
+        }
+        networkCallback?.let {
+            connectivityManager?.registerDefaultNetworkCallback(it)
+        }
     }
 
     private fun initCookieManager() {
@@ -97,7 +150,6 @@ class MainActivity : AppCompatActivity() {
             settings.domStorageEnabled = true
             settings.allowFileAccess = true
             addJavascriptInterface(bridge, "TingwuBridge")
-            // 加载纯净的移动卡片 UI
             loadUrl("file:///android_asset/ui/index.html")
         }
     }
@@ -111,16 +163,28 @@ class MainActivity : AppCompatActivity() {
 
         engine.webViewClient = TingwuWebViewClient(this) { isLoading, url ->
             binding.pageProgressBar.visibility = if (isLoading) View.VISIBLE else View.GONE
+
+            // 登录弹窗/独立登录页深度自适应接管 (解决跨域 iframe 限制)
             if (url.contains("login") || url.contains("passport")) {
                 binding.uiWebView.evaluateJavascript(
                     "window.onNativeEngineState && window.onNativeEngineState('need_login', '需登录阿里云');",
                     null
                 )
+                // 若用户当前就在主页，直接展示原生等比缩放的引擎视图，确保短信登录可见
+                if (currentTabIndex == 0) {
+                    binding.uiWebView.visibility = View.GONE
+                    binding.engineWebView.visibility = View.VISIBLE
+                }
             } else if (!isLoading && url.contains("tingwu.aliyun.com")) {
                 binding.uiWebView.evaluateJavascript(
                     "window.onNativeEngineState && window.onNativeEngineState('ready', '听悟已就绪');",
                     null
                 )
+                // 登录成功跳回后，如果位于实时卡片页(Tab 1)确保恢复纯净卡片视图 (修复 P1-3)
+                if (currentTabIndex == 1) {
+                    binding.engineWebView.visibility = View.GONE
+                    binding.uiWebView.visibility = View.VISIBLE
+                }
             }
         }
 
@@ -131,12 +195,26 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // 后台静默加载真实通义听悟
+        // 后台加载真实通义听悟
         engine.loadUrl(TINGWU_HOME_URL)
     }
 
     private fun setupTopBar() {
         binding.btnRefreshPage.setOnClickListener {
+            if (isRecording) {
+                AlertDialog.Builder(this)
+                    .setTitle("提示")
+                    .setMessage("当前正在录音中，刷新将重置连接并终止录音，是否确认？")
+                    .setPositiveButton("确定刷新") { _, _ ->
+                        handleStopRecording()
+                        reloadEngine()
+                        binding.uiWebView.reload()
+                    }
+                    .setNegativeButton("取消", null)
+                    .show()
+                return@setOnClickListener
+            }
+
             reloadEngine()
             binding.uiWebView.reload()
             Toast.makeText(this, "正在重新连接听悟引擎…", Toast.LENGTH_SHORT).show()
@@ -148,19 +226,23 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupBottomNav() {
-        // Tab 1: 主页 (展示官方主页，用于登录账号、解决短信验证码、管理个人空间)
+        // Tab 0: 主页 (展示官方主页，用于登录账号、解决短信验证码、管理个人空间)
         binding.tabHome.setOnClickListener {
+            if (isRecording) {
+                Toast.makeText(this, "正在实时录音中，请先结束录音再切换页面", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
             switchTab(0)
             binding.uiWebView.visibility = View.GONE
             binding.engineWebView.visibility = View.VISIBLE
             val currUrl = binding.engineWebView.url ?: ""
-            if (!currUrl.contains("tingwu.aliyun.com/home")) {
+            if (!currUrl.contains("tingwu.aliyun.com/home") && !currUrl.contains("passport")) {
                 binding.engineWebView.loadUrl(TINGWU_HOME_URL)
             }
             binding.tvUrlSubtitle.text = "主页 · 账号登录与工作台"
         }
 
-        // Tab 2: 实时 (专属移动端极简卡片，实时录音、双语字幕与双语翻译)
+        // Tab 1: 实时 (专属移动端极简卡片，实时录音、双语字幕与双语翻译)
         binding.tabLive.setOnClickListener {
             switchTab(1)
             binding.engineWebView.visibility = View.GONE
@@ -168,8 +250,12 @@ class MainActivity : AppCompatActivity() {
             binding.tvUrlSubtitle.text = "极简卡片 · 实时录音与翻译"
         }
 
-        // Tab 3: 历史 (查看云端已保存的历史会议纪要)
+        // Tab 2: 历史 (查看云端已保存的历史会议纪要)
         binding.tabHistory.setOnClickListener {
+            if (isRecording) {
+                Toast.makeText(this, "正在实时录音中，请先结束录音再切换页面", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
             switchTab(2)
             binding.uiWebView.visibility = View.GONE
             binding.engineWebView.visibility = View.VISIBLE
@@ -180,7 +266,7 @@ class MainActivity : AppCompatActivity() {
             binding.tvUrlSubtitle.text = "历史 · 云端会议与文档记录"
         }
 
-        // Tab 4: 设置 (屏幕常亮、麦克风输入与关于)
+        // Tab 3: 设置
         binding.tabSettings.setOnClickListener {
             showSettingsDialog()
         }
@@ -208,7 +294,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     // =========================================================
-    // 真实录音与 WebRTC 硬件生命周期联动
+    // 真实录音与 WebRTC 硬件生命周期联动 (双向 ACK 协议，杜绝假录音)
     // =========================================================
 
     fun handleStartRecording() {
@@ -222,34 +308,48 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        isRecording = true
-        recordSeconds = 0
+        // 先向前台卡片抛出“正在连接听悟引擎”的缓冲态，严禁未响应就直接走表
+        binding.uiWebView.evaluateJavascript(
+            "window.onNativeRecordingPending && window.onNativeRecordingPending(true);",
+            null
+        )
 
-        // 1. 启动前台保活服务
+        // 1. 启动前台保活服务 (持 WakeLock)
         RecordingService.startService(this)
 
-        // 2. 激活蓝牙 SCO 耳机麦克风拾音
-        audioRecorderManager.startBluetoothSco()
-
-        // 3. 启动本地双录 AAC 防灾备份
-        audioRecorderManager.startLocalBackupRecording()
-
-        // 4. 指挥后台真实的通义听悟 PC 网页开启录音
+        // 2. 指挥后台真实的通义听悟 PC 网页开启录音
         binding.engineWebView.evaluateJavascript(
             "window.__tingwuController && window.__tingwuController.startRecording();",
             null
         )
+    }
 
-        // 5. 启动计时器并通知前台卡片 UI 切换状态
-        timerHandler.post(timerRunnable)
-        binding.uiWebView.evaluateJavascript(
-            "window.onNativeRecordingStatus && window.onNativeRecordingStatus(true);",
-            null
-        )
-        binding.uiWebView.evaluateJavascript(
-            "window.onNativeTimerTick && window.onNativeTimerTick('00:00:00');",
-            null
-        )
+    /**
+     * 收到后台听悟网页的真实 ACK 确认后，才正式翻转状态并开始计时
+     */
+    fun handleRecordingAck(started: Boolean) {
+        if (started) {
+            isRecording = true
+            recordSeconds = 0
+
+            timerHandler.post(timerRunnable)
+            binding.uiWebView.evaluateJavascript(
+                "window.onNativeRecordingStatus && window.onNativeRecordingStatus(true);",
+                null
+            )
+            binding.uiWebView.evaluateJavascript(
+                "window.onNativeTimerTick && window.onNativeTimerTick('00:00:00');",
+                null
+            )
+        } else {
+            isRecording = false
+            RecordingService.stopService(this)
+            binding.uiWebView.evaluateJavascript(
+                "window.onNativeRecordingPending && window.onNativeRecordingPending(false);",
+                null
+            )
+            Toast.makeText(this, "启动录音失败，请确认已在主页登录阿里云账号", Toast.LENGTH_LONG).show()
+        }
     }
 
     fun handleStopRecording() {
@@ -260,17 +360,13 @@ class MainActivity : AppCompatActivity() {
         // 1. 停止前台保活服务
         RecordingService.stopService(this)
 
-        // 2. 释放蓝牙与本地录音备份
-        audioRecorderManager.stopBluetoothSco()
-        audioRecorderManager.stopLocalBackupRecording()
-
-        // 3. 指挥后台通义听悟网页停止录音
+        // 2. 指挥后台通义听悟网页停止录音
         binding.engineWebView.evaluateJavascript(
             "window.__tingwuController && window.__tingwuController.stopRecording();",
             null
         )
 
-        // 4. 停止计时器并通知前台 UI
+        // 3. 停止计时器并通知前台 UI
         timerHandler.removeCallbacks(timerRunnable)
         binding.uiWebView.evaluateJavascript(
             "window.onNativeRecordingStatus && window.onNativeRecordingStatus(false);",
@@ -279,15 +375,23 @@ class MainActivity : AppCompatActivity() {
     }
 
     // =========================================================
-    // 数据穿透：后台听悟截获的实时转写 JSON $\rightarrow$ 原生中继 $\rightarrow$ 前台卡片渲染
+    // 数据穿透：Base64 编码传输，安全可靠
     // =========================================================
 
     fun relayTranscriptionToUi(json: String) {
-        val escaped = json.replace("\\", "\\\\").replace("'", "\\'")
-        binding.uiWebView.evaluateJavascript(
-            "window.onNativeTranscriptionReceived && window.onNativeTranscriptionReceived('$escaped');",
-            null
-        )
+        try {
+            val base64Str = Base64.encodeToString(json.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
+            binding.uiWebView.evaluateJavascript(
+                "window.__receiveTranscriptionBase64 && window.__receiveTranscriptionBase64('$base64Str');",
+                null
+            )
+        } catch (e: Exception) {
+            val escaped = json.replace("\\", "\\\\").replace("'", "\\'")
+            binding.uiWebView.evaluateJavascript(
+                "window.onNativeTranscriptionReceived && window.onNativeTranscriptionReceived('$escaped');",
+                null
+            )
+        }
     }
 
     fun updateEngineState(state: String, desc: String) {
@@ -350,7 +454,7 @@ class MainActivity : AppCompatActivity() {
                     3 -> {
                         AlertDialog.Builder(this)
                             .setTitle("关于 mytyty")
-                            .setMessage("mytyty v1.0.0\n\n- 定制原生卡片 UI\n- 深度伪装 Windows 11 Chrome\n- 适配阿里云短信验证码展示\n- 真实 WebRTC 物理麦克风穿透")
+                            .setMessage("mytyty v1.0.0\n\n- 专属极简移动卡片 UI\n- 深度伪装 Windows 11 Chrome\n- 适配阿里云短信验证码展示\n- 真实 WebRTC 物理麦克风穿透")
                             .setPositiveButton("确定", null)
                             .show()
                     }
@@ -370,13 +474,16 @@ class MainActivity : AppCompatActivity() {
     private fun setupBackNavigation() {
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
+                // SPEC 8.7 规范：若当前处于主页(0)或历史(2)展示网页，优先允许在 WebView 内部后退 (修复 P1-3)
+                if (currentTabIndex != 1 && binding.engineWebView.visibility == View.VISIBLE && binding.engineWebView.canGoBack()) {
+                    binding.engineWebView.goBack()
+                    return
+                }
+
                 if (currentTabIndex != 1) {
-                    // 如果在主页或历史，按返回键切回实时卡片页
                     switchTab(1)
                     binding.engineWebView.visibility = View.GONE
                     binding.uiWebView.visibility = View.VISIBLE
-                } else if (binding.engineWebView.canGoBack()) {
-                    binding.engineWebView.goBack()
                 } else {
                     val currentTime = System.currentTimeMillis()
                     if (currentTime - backPressedTime < 2000) {
@@ -418,6 +525,14 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        try {
+            unregisterReceiver(stopRecordingReceiver)
+        } catch (e: Exception) {}
+
+        try {
+            networkCallback?.let { connectivityManager?.unregisterNetworkCallback(it) }
+        } catch (e: Exception) {}
+
         timerHandler.removeCallbacks(timerRunnable)
         if (isRecording) {
             handleStopRecording()
